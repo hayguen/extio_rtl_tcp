@@ -8,3 +8,4 @@ You need to checkout https://github.com/hayguen/clsocket in parallel to extio_rt
 
 cause the files are directly referenced from the ExtIO project.
 
+Precompiled DLL is available here: http://hdsdr.de/download/ExtIO/ExtIO_RTL_TCP.zip
