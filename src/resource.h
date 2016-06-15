@@ -18,3 +18,4 @@
 #define IDC_PERSISTCONNECTION                   1015
 #define IDC_TUNERBANDWIDTH                      1016
 #define IDC_TUNER_BW_LABEL                      1017
+#define IDC_DECIMATION                          1018

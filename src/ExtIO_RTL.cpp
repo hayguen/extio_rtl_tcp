@@ -37,6 +37,15 @@
 	#define snprintf  _snprintf
 #endif
 
+/* 0 == just filter (sum) without decimation
+ * 1 == do full decimation
+ */
+#define FULL_DECIMATION		1
+
+static int buffer_sizes[] = { //in kBytes
+	1, 2, 4, 8, 16, 32, 64, 128, 256
+};
+
 
 #define MAX_PPM	1000
 #define MIN_PPM	-1000
@@ -164,7 +173,7 @@ typedef struct sr {
 
 
 static sr_t samplerates[] = {
-#if 0
+#if 1
 	{ 225001.0, TEXT("0.23 Msps"), 225001 },			// [0]
 	{ 250000.0, TEXT("0.25 Msps"), 250000 },			// [1]
 	{ 264600.0, TEXT("0.26 Msps (44.1 kHz)"), 264600 },	// [2]
@@ -173,6 +182,9 @@ static sr_t samplerates[] = {
 #endif
 
 	{  960000.0, TEXT("0.96 Msps (48.0 kHz)"),  960000 },	// = 5 * 192 kHz		[1]
+
+	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },
+
 	{ 1058400.0, TEXT("1.06 Msps (44.1 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[2]
 	{ 1152000.0, TEXT("1.15 Msps (48.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[3]
 
@@ -181,24 +193,35 @@ static sr_t samplerates[] = {
 	{ 1344000.0, TEXT("1.34 Msps (48.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[5]
 
 	{ 1411200.0, TEXT("1.41 Msps (44.1 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[6]
+
+	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },
+
 	{ 1536000.0, TEXT("1.54 Msps (48.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[7]
 
 	{ 1764000.0, TEXT("1.76 Msps (44.1 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[8]
 	//{ 1800000.0, TEXT("1.8 Msps"), 1800000 },
 	{ 1920000.0, TEXT("1.92 Msps (48.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[9]
 
+	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },
+
 	{ 2116800.0, TEXT("2.12 Msps (44.1 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[10]
 	{ 2304000.0, TEXT("2.30 Msps (48.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[11]
 	//{ 2400000.0, TEXT("2.4 Msps"),  2400000 },
 
 	{ 2469600.0, TEXT("2.47 Msps (44.1 kHz)"), 2469600 },	// = 14 * 176.4 kHz		[12]
+
+	{ 2500000.0, TEXT("2.50 Msps"), 2500000 },
+
 	{ 2688000.0, TEXT("2.69 Msps (48.0 kHz)"), 2688000 },	// = 14 * 192 kHz		[13]
 
 	{ 2646000.0, TEXT("2.65 Msps (44.1 kHz)"), 2646000 },	// 15 * 176.4 kHz		[14]
 	{ 2822400.0, TEXT("2.82 Msps (44.1 kHz)"), 2822400 },	// 16 * 176.4 kHz		[15]
 
 	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz)"), 2880000 },	// 15 * 192 kHz			[16]
+
 #if 0
+	{ 3000000.0, TEXT("3.00 Msps"), 3000000 },
+
 	{ 3072000.0, TEXT("3.07 Msps (48.0 kHz)"), 3072000 },	// 16 * 192 kHz			[17]
 	{ 3090000.0, TEXT("3.09 Msps"), 3090000 },
 	{ 3100000.0, TEXT("3.1 Msps"), 3100000 },
@@ -242,17 +265,18 @@ static volatile uint32_t	numTunerGains = 0;
 
 static volatile bool GotTunerInfo = false;
 
-static int buffer_sizes[] = { //in kBytes
-	1, 2, 4, 8, 16, 32, 64, 128, 256
-};
+
+#define MAX_DECIMATIONS		8
+
+static int maxDecimation = 0;
+
 
 #define MAX_BUFFER_LEN	(256*1024)
-#define NUM_BUFFERS_BEFORE_CALLBACK		4
+#define NUM_BUFFERS_BEFORE_CALLBACK		( MAX_DECIMATIONS + 1 )
 
 static bool rcvBufsAllocated = false;
 static short * short_buf = 0;
 static uint8_t * rcvBuf[NUM_BUFFERS_BEFORE_CALLBACK + 1] = { 0 };
-
 
 static volatile int somewhat_changed = 0;	// 1 == freq
 											// 2 == srate
@@ -263,6 +287,7 @@ static volatile int somewhat_changed = 0;	// 1 == freq
 											// 64 == offset Tuning (E4000)
 											// 128 == freq corr ppm
 											// 256 == tuner bandwidth
+											// 512 == decimation
 
 static volatile long last_freq=100000000;
 static volatile long new_freq = 100000000;
@@ -272,6 +297,9 @@ static volatile int new_srate_idx = 4;
 
 static volatile int last_TunerBW = 0;		// 0 == automatic, sonst in Hz
 static volatile int new_TunerBW = 0;		// n_bandwidths = bandwidths[]; nearestBwIdx()
+
+static volatile int last_Decimation = 0;
+static volatile int new_Decimation = 0;
 
 static volatile int last_gain = 1;
 static volatile int new_gain = 1;
@@ -330,6 +358,7 @@ void (* WinradCallBack)(int, int, float, void *) = NULL;
 #define WINRAD_SRCHANGE 100
 #define WINRAD_LOCHANGE 101
 #define WINRAD_ATTCHANGE 125
+#define WINRAD_SRATES_CHANGED	137
 
 
 static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -494,6 +523,10 @@ long LIBRTL_API __stdcall GetHWSR()
 {
 	long sr = long(samplerates[new_srate_idx].valueInt);
 	//::MessageBoxA(NULL, samplerates[new_srate_idx].name, "GetHWSR()", 0);
+#if ( FULL_DECIMATION )
+	sr /= new_Decimation;
+#endif
+
 	return sr;
 }
 
@@ -502,7 +535,11 @@ int LIBRTL_API __stdcall ExtIoGetSrates( int srate_idx, double * samplerate )
 {
 	if (srate_idx < n_srates)
 	{
-		*samplerate=  samplerates[srate_idx].value;
+#if ( FULL_DECIMATION )
+		*samplerate = samplerates[srate_idx].value / new_Decimation;
+#else
+		*samplerate = samplerates[srate_idx].value;
+#endif
 		return 0;
 	}
 	return 1;	// ERROR
@@ -667,6 +704,10 @@ int   LIBRTL_API __stdcall ExtIoGetSetting( int idx, char * description, char * 
 		snprintf(description, 1024, "%s", "number of Milliseconds to Sleep before trying to receive new data");
 		snprintf(value, 1024, "%d", SleepMillisWaitingForData);
 		return 0;
+	case 15:
+		snprintf(description, 1024, "%s", "Decimation Factor for Sample Rate");
+		snprintf(value, 1024, "%d", new_Decimation);
+		return 0;
 	default:
 		return -1;	// ERROR
 	}
@@ -737,6 +778,14 @@ void  LIBRTL_API __stdcall ExtIoSetSetting( int idx, const char * value )
 		if (SleepMillisWaitingForData > 100)
 			SleepMillisWaitingForData = 100;
 		break;
+	case 15:
+		new_Decimation = atoi(value);
+
+		if (new_Decimation < 1)
+			new_Decimation = 1;
+		else if (new_Decimation > 2)
+			new_Decimation = new_Decimation & (~1);
+		break;
 	}
 }
 
@@ -806,8 +855,11 @@ void LIBRTL_API  __stdcall ExtIoSDRInfo( int extSDRInfo, int additionalValue, vo
 {
 	if( extSDRInfo == extSDR_supports_PCMU8 )
     {
-		//This versions supports 8bit samples
-		extHWtype = exthwUSBdataU8;
+		if (MAX_DECIMATIONS == 1)
+		{
+			//This versions supports 8bit samples
+			extHWtype = exthwUSBdataU8;
+		}
     }
 	return;
 }
@@ -970,12 +1022,14 @@ void ThreadProc(void *p)
 		}
 
 		int callbackBufferBegin = 0;
+		int prevBuffer = NUM_BUFFERS_BEFORE_CALLBACK - 1;
 		int numReceivedBuffers = 0;
 		int receivedLen = 0;
 		unsigned receivedBlocks = 0;
 		int initialSrate = 1;
 		int receivedSamples = 0;
 		commandEverything = true;
+		memset(&rcvBuf[prevBuffer][0], 0, MAX_BUFFER_LEN + 2*MAX_DECIMATIONS );
 
 		while (!terminateThread)
 		{
@@ -1076,37 +1130,167 @@ void ThreadProc(void *p)
 					last_gain = new_gain;
 					somewhat_changed &= ~(4);
 				}
+				if (last_Decimation != new_Decimation)
+				{
+					last_Decimation = new_Decimation;
+					somewhat_changed &= ~(512);
+				}
+
 				commandEverything = false;
 			}
 
 			int32 toRead = buffer_len - receivedLen;
-			int32 nRead = conn.Receive(toRead);
+			//int32 nRead = conn.Receive(toRead);
+			int32 nRead = conn.Receive(toRead, &rcvBuf[numReceivedBuffers][2*MAX_DECIMATIONS + receivedLen]);
 			if (nRead > 0)
 			{
-				uint8_t *nBuf = conn.GetData();
-				memcpy(&rcvBuf[numReceivedBuffers][receivedLen], nBuf, nRead);
+				//uint8_t *nBuf = conn.GetData();
+				//memcpy(&rcvBuf[numReceivedBuffers][2*MAX_DECIMATIONS+receivedLen], nBuf, nRead);
 				receivedLen += nRead;
 				if (receivedLen >= buffer_len)
 				{
 					if (ThreadStreamToSDR)
 					{
+
 						++numReceivedBuffers;
+#if ( FULL_DECIMATION )
+						if (numReceivedBuffers >= new_Decimation)
+#else
 						if (numReceivedBuffers >= NUM_BUFFERS_BEFORE_CALLBACK)
+#endif
 						{
+							const int n_samples_per_block = buffer_len / 2;
+							const int n_output_per_block = n_samples_per_block / new_Decimation;
+#if ( FULL_DECIMATION )
+							short *short_ptr = &short_buf[0];
+							for (int callbackBufferNo = 0; callbackBufferNo < new_Decimation; ++callbackBufferNo)
+#else
 							for (int callbackBufferNo = callbackBufferBegin; callbackBufferNo < NUM_BUFFERS_BEFORE_CALLBACK; ++callbackBufferNo)
+#endif
 							{
-								if (extHWtype == exthwUSBdata16)
+#if ( FULL_DECIMATION )
+								if (new_Decimation >= 1)
+#else
+								if (new_Decimation > 1)
+#endif
 								{
+									for (int k = 1; k <= 2*new_Decimation; ++k)
+										rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - k] = rcvBuf[prevBuffer][2*MAX_DECIMATIONS + buffer_len - k];
+
+									const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - 2*new_Decimation];
+#if ( !FULL_DECIMATION )
 									short *short_ptr = &short_buf[0];
-									const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][0];
-									for (int i = 0; i < buffer_len; i++)
-										*short_ptr++ = ((short)(*char_ptr++)) - 128;
-									WinradCallBack(buffer_len >> 1, 0, 0, short_buf);
+#endif
+									int i;
+
+#if ( FULL_DECIMATION )
+	#define CHAR_PTR_INC(D)		(2 * D);
+	#define ITER_COUNT			n_output_per_block
+#else
+	#define CHAR_PTR_INC(D)		(2);
+	#define ITER_COUNT			n_samples_per_block
+#endif
+
+									switch (new_Decimation)
+									{
+									case 1:
+										for (i = 0; i < ITER_COUNT; i++)
+										{
+											*short_ptr++ = ((short)(char_ptr[0])) - 128;
+											*short_ptr++ = ((short)(char_ptr[1])) - 128;
+											char_ptr += 2;
+										}
+										break;
+									case 2:
+										for (i = 0; i < ITER_COUNT; i++)
+										{
+											*short_ptr++ = ((short)(char_ptr[0])) + ((short)(char_ptr[2])) - 2 * 128;
+											*short_ptr++ = ((short)(char_ptr[1])) + ((short)(char_ptr[3])) - 2 * 128;
+											char_ptr += CHAR_PTR_INC(2);
+										}
+										break;
+									case 4:
+										for (i = 0; i < ITER_COUNT; i++)
+										{
+											*short_ptr++ = ((short)(char_ptr[0]))
+												+ ((short)(char_ptr[2]))
+												+ ((short)(char_ptr[4]))
+												+ ((short)(char_ptr[6])) - 4 * 128;
+											*short_ptr++ = ((short)(char_ptr[1]))
+												+ ((short)(char_ptr[3]))
+												+ ((short)(char_ptr[5]))
+												+ ((short)(char_ptr[7])) - 4 * 128;
+											char_ptr += CHAR_PTR_INC(4);
+										}
+										break;
+									case 6:
+										for (i = 0; i < ITER_COUNT; i++)
+										{
+											*short_ptr++ = ((short)(char_ptr[0]))
+												+ ((short)(char_ptr[2]))
+												+ ((short)(char_ptr[4]))
+												+ ((short)(char_ptr[6]))
+												+ ((short)(char_ptr[8]))
+												+ ((short)(char_ptr[10])) - 6 * 128;
+											*short_ptr++ = ((short)(char_ptr[1]))
+												+ ((short)(char_ptr[3]))
+												+ ((short)(char_ptr[5]))
+												+ ((short)(char_ptr[7]))
+												+ ((short)(char_ptr[9]))
+												+ ((short)(char_ptr[11])) - 6 * 128;
+											char_ptr += CHAR_PTR_INC(6);
+										}
+										break;
+									case 8:
+										for (i = 0; i < ITER_COUNT; i++)
+										{
+											*short_ptr++ = ((short)(char_ptr[0]))
+												+ ((short)(char_ptr[2]))
+												+ ((short)(char_ptr[4]))
+												+ ((short)(char_ptr[6]))
+												+ ((short)(char_ptr[8]))
+												+ ((short)(char_ptr[10]))
+												+ ((short)(char_ptr[12]))
+												+ ((short)(char_ptr[14])) - 8 * 128;
+											*short_ptr++ = ((short)(char_ptr[1]))
+												+ ((short)(char_ptr[3]))
+												+ ((short)(char_ptr[5]))
+												+ ((short)(char_ptr[7]))
+												+ ((short)(char_ptr[9]))
+												+ ((short)(char_ptr[11]))
+												+ ((short)(char_ptr[13]))
+												+ ((short)(char_ptr[15])) - 8 * 128;
+											char_ptr += CHAR_PTR_INC(8);
+										}
+										break;
+									}
+#if ( !FULL_DECIMATION )
+									WinradCallBack(n_samples_per_block, 0, 0, short_buf);
+#endif
 								}
 								else
-									WinradCallBack(buffer_len >> 1, 0, 0, &rcvBuf[callbackBufferNo][0]);
-							}
+								{
+									if (extHWtype == exthwUSBdata16)
+									{
+										short *short_ptr = &short_buf[0];
+										const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][MAX_DECIMATIONS];
+										for (int i = 0; i < buffer_len; i++)
+											*short_ptr++ = ((short)(*char_ptr++)) - 128;
+										WinradCallBack(n_samples_per_block, 0, 0, short_buf);
+									}
+									else
+										WinradCallBack(n_samples_per_block, 0, 0, &rcvBuf[callbackBufferNo][MAX_DECIMATIONS]);
+								}
+								prevBuffer = callbackBufferNo;
+							} // end for
+
+#if ( FULL_DECIMATION )
+							WinradCallBack(n_samples_per_block, 0, 0, short_buf);
+							numReceivedBuffers = callbackBufferBegin = 0;
+#else
 							numReceivedBuffers = callbackBufferBegin = NUM_BUFFERS_BEFORE_CALLBACK - 1;
+#endif
+
 						}
 					}
 					else
@@ -1237,6 +1421,53 @@ static void updateTunerGains(HWND hwndDlg)
 }
 
 
+static void updateDecimations(HWND hwndDlg)
+{
+	TCHAR str[256];
+	HWND hDecimation = GetDlgItem(hwndDlg, IDC_DECIMATION);
+
+	maxDecimation = 1;
+	//int bwIdx = nearestBwIdx(new_TunerBW);
+
+	//_stprintf_s(str, 255, TEXT("tunerBW = %d"), new_TunerBW);
+	//::MessageBoxA(NULL, str, "info", 0);
+
+	ComboBox_ResetContent(hDecimation);
+	for (int i = 1; i <= MAX_DECIMATIONS; i++)
+	{
+		if (i == 1)
+		{
+			_stprintf_s(str, 255, TEXT("/ %d"), i);
+			ComboBox_AddString(hDecimation, str);
+			maxDecimation = i;
+		}
+		else if ( (i & 1) == 0 && samplerates[new_srate_idx].valueInt >= i * 1000 * new_TunerBW * 24 / 35)
+		{
+			double newSrateKHz = (double)samplerates[new_srate_idx].valueInt / ( i * 1000 );
+			_stprintf_s(str, 255, TEXT("/ %d  -> %.1f kHz"), i, newSrateKHz);
+			ComboBox_AddString(hDecimation, str);
+			maxDecimation = i;
+		}
+	}
+	if (new_Decimation < 1)
+		new_Decimation = 1;
+	if (new_Decimation > maxDecimation)
+		new_Decimation = maxDecimation;
+
+	//_stprintf_s(str, 255, TEXT("maxDec %d, newDec %d"), maxDecimation, new_Decimation);
+	//::MessageBoxA(NULL, str, "info", 0);
+
+	// idx , decimation
+	// 0, 1
+	// 1, 2
+	// 2, 4
+	// 3, 6
+	// 4, 8
+	int decimationIdx = new_Decimation >> 1;
+	ComboBox_SetCurSel(hDecimation, decimationIdx);
+}
+
+
 static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	static HBRUSH BRUSH_RED=CreateSolidBrush(RGB(255,0,0));
@@ -1292,8 +1523,8 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 			}
 
 			updateTunerBWs(hwndDlg);
-
 			updateTunerGains(hwndDlg);
+			updateDecimations(hwndDlg);
 
 			return TRUE;
 		}
@@ -1306,6 +1537,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
 				updateTunerBWs(hwndDlg);
 				updateTunerGains(hwndDlg);
+				updateDecimations(hwndDlg);
 
 				BOOL enableOffset = (1 == tunerNo) ? TRUE : FALSE;
 				BOOL enableTunerBW = (bandwidths && 0 == new_DirectSampling) ? TRUE : FALSE;
@@ -1401,6 +1633,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                     { 
 						new_srate_idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
 						somewhat_changed |= 2;
+						updateDecimations(hwndDlg);
 						WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
                     }
 					if(GET_WM_COMMAND_CMD(wParam, lParam) ==  CBN_EDITUPDATE)
@@ -1434,6 +1667,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 						bufferSizeIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
 						buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
 						WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
+						::MessageBoxA(NULL, "Restart SDR application,\nthat changed buffer size has effect!", "Info", 0);
                     }
                     return TRUE;
 
@@ -1443,6 +1677,25 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 						int bwIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
 						new_TunerBW = bandwidths[bwIdx];
 						somewhat_changed |= 256;
+						updateDecimations(hwndDlg);
+					}
+					return TRUE;
+
+				case IDC_DECIMATION:
+					if (GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+					{
+						// idx , decimation
+						// 0, 1
+						// 1, 2
+						// 2, 4
+						// 3, 6
+						// 4, 8
+						int idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+						new_Decimation = (idx == 0) ? 1 : (2 * idx);
+						somewhat_changed |= 512;
+
+						WinradCallBack(-1, WINRAD_SRATES_CHANGED, 0, NULL);// Signal application
+						WinradCallBack(-1, WINRAD_SRCHANGE, 0, NULL);// Signal application
 					}
 					return TRUE;
 
