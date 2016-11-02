@@ -145,7 +145,6 @@
     <ResourceCompile Include="src\ExtIO_RTL.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(SolutionDir)\..\clsocket\src\ActiveSocket.cpp" />
     <ClCompile Include="$(SolutionDir)\..\clsocket\src\PassiveSocket.cpp" />
     <ClCompile Include="$(SolutionDir)\..\clsocket\src\SimpleSocket.cpp" />
     <ClCompile Include="src\dllmain.cpp" />

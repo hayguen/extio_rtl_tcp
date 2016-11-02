@@ -17,6 +17,15 @@
 
 #define LIBRTL_EXPORTS 1
 
+#define ALWAYS_PCMU8	0
+#define ALWAYS_PCM16	0
+
+/* 0 == just filter (sum) without decimation
+* 1 == do full decimation
+*/
+#define FULL_DECIMATION		1
+
+
 #include <stdint.h>
 #include <ActiveSocket.h>
 
@@ -37,10 +46,12 @@
 	#define snprintf  _snprintf
 #endif
 
-/* 0 == just filter (sum) without decimation
- * 1 == do full decimation
- */
-#define FULL_DECIMATION		1
+#if ALWAYS_PCMU8
+#define MAX_DECIMATIONS		1
+#else
+#define MAX_DECIMATIONS		8
+#endif
+
 
 static int buffer_sizes[] = { //in kBytes
 	1, 2, 4, 8, 16, 32, 64, 128, 256
@@ -88,7 +99,12 @@ typedef enum
                         // via the callback device. Data are in 32-bit  integer format, little endian.
                         //   each sample occupies 4 bytes (=32 bits) with full range: from  -2^31 to +2^31 -1
 } extHWtypeT;
+
+#if ALWAYS_PCMU8
+extHWtypeT extHWtype = exthwUSBdataU8;	/* ExtIO type 8-bit samples */
+#else
 extHWtypeT extHWtype = exthwUSBdata16;  /* default ExtIO type 16-bit samples */
+#endif
 
 typedef enum
 {
@@ -102,6 +118,8 @@ typedef enum
   , extSDR_supports_PCMU8         = 7   // exthwUSBdataU8 is supported
   , extSDR_supports_PCMS8         = 8   // exthwUSBdataS8 is supported
   , extSDR_supports_PCM32         = 9   // exthwFullPCM32 is supported
+  , extSDR_supports_Logging       = 10  // extHw_MSG_* is supported
+  , extSDR_supports_SampleFormats = 11  // extHw_SampleFormat_* is supported
 } extSDR_InfoT;
 
 
@@ -174,69 +192,74 @@ typedef struct sr {
 
 static sr_t samplerates[] = {
 #if 1
-	{ 225001.0, TEXT("0.23 Msps"), 225001 },			// [0]
-	{ 250000.0, TEXT("0.25 Msps"), 250000 },			// [1]
-	{ 264600.0, TEXT("0.26 Msps (44.1 kHz)"), 264600 },	// [2]
-	{ 288000.0, TEXT("0.29 Msps (48.0 kHz)"), 288000 },	// [3]
-	{ 300000.0, TEXT("0.3 Msps"), 300000 },				// [4]
+	{ 225001.0, TEXT("0.225 Msps"), 225001 },				// [0]
+	{ 250000.0, TEXT("0.25 Msps"), 250000 },				// [1]
+	{ 264600.0, TEXT("0.265 Msps (44.1 kHz)"), 264600 },	// [2]
+	{ 288000.0, TEXT("0.288 Msps (48.0 kHz)"), 288000 },	// [3]
+	{ 300000.0, TEXT("0.3 Msps"), 300000 },					// [4]
 #endif
 
-	{  960000.0, TEXT("0.96 Msps (48.0 kHz)"),  960000 },	// = 5 * 192 kHz		[1]
+	{  960000.0, TEXT("0.96 kSps (48.0 kHz)"),  960000 },	// = 5 * 192 kHz		[5]
 
-	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },
+	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },				// [6]
 
-	{ 1058400.0, TEXT("1.06 Msps (44.1 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[2]
-	{ 1152000.0, TEXT("1.15 Msps (48.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[3]
+	{ 1058400.0, TEXT("1.058 Msps (44.1 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[7]
+	{ 1152000.0, TEXT("1.152 Msps (48.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[8]
 
 	//{ 1200000.0, TEXT("1.20 Msps"),  1200000 },
-	{ 1234800.0, TEXT("1.23 Msps (44.1 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[4]
-	{ 1344000.0, TEXT("1.34 Msps (48.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[5]
+	{ 1234800.0, TEXT("1.234 Msps (44.1 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[9]
+	{ 1344000.0, TEXT("1.344 Msps (48.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[10]
 
-	{ 1411200.0, TEXT("1.41 Msps (44.1 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[6]
+	{ 1411200.0, TEXT("1.411 Msps (44.1 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[11]
 
-	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },
+	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },				// [12]
 
-	{ 1536000.0, TEXT("1.54 Msps (48.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[7]
+	{ 1536000.0, TEXT("1.536 Msps (48.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[13]
 
-	{ 1764000.0, TEXT("1.76 Msps (44.1 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[8]
+	{ 1764000.0, TEXT("1.764 Msps (44.1 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[14]
+
 	//{ 1800000.0, TEXT("1.8 Msps"), 1800000 },
-	{ 1920000.0, TEXT("1.92 Msps (48.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[9]
+	{ 1920000.0, TEXT("1.92 Msps (48.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[15]
 
-	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },
+	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },				// [16]
 
-	{ 2116800.0, TEXT("2.12 Msps (44.1 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[10]
-	{ 2304000.0, TEXT("2.30 Msps (48.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[11]
-	//{ 2400000.0, TEXT("2.4 Msps"),  2400000 },
+	{ 2116800.0, TEXT("2.116 Msps (44.1 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[17]
+	{ 2304000.0, TEXT("2.304 Msps (48.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[18]
 
-	{ 2469600.0, TEXT("2.47 Msps (44.1 kHz)"), 2469600 },	// = 14 * 176.4 kHz		[12]
+	{ 2400000.0, TEXT("2.4 Msps"),  2400000 },
 
-	{ 2500000.0, TEXT("2.50 Msps"), 2500000 },
+	// loss of samples > 2.4 Msps
 
-	{ 2688000.0, TEXT("2.69 Msps (48.0 kHz)"), 2688000 },	// = 14 * 192 kHz		[13]
+	{ 2469600.0, TEXT("2.469 Msps (44.1 kHz, rtl_test!)"), 2469600 },	// = 14 * 176.4 kHz		[19]
 
-	{ 2646000.0, TEXT("2.65 Msps (44.1 kHz)"), 2646000 },	// 15 * 176.4 kHz		[14]
-	{ 2822400.0, TEXT("2.82 Msps (44.1 kHz)"), 2822400 },	// 16 * 176.4 kHz		[15]
+	{ 2500000.0, TEXT("2.50 Msps (rtl_test!)"), 2500000 },				// [20]
 
-	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz)"), 2880000 },	// 15 * 192 kHz			[16]
+	{ 2646000.0, TEXT("2.646 Msps (44.1 kHz, rtl_test!)"), 2646000 },	// = 15 * 176.4 kHz		[21]
+
+	{ 2688000.0, TEXT("2.688 Msps (48.0 kHz, rtl_test!)"), 2688000 },	// = 14 * 192 kHz		[22]
+
+	{ 2822400.0, TEXT("2.822 Msps (44.1 kHz, rtl_test!)"), 2822400 },	// = 16 * 176.4 kHz		[23]
+
+	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz, rtl_test!)"), 2880000 },	// = 15 * 192 kHz		[24]
 
 #if 0
-	{ 3000000.0, TEXT("3.00 Msps"), 3000000 },
+	{ 3000000.0, TEXT("3.00 Msps (rtl_test!!!)"), 3000000 },
 
-	{ 3072000.0, TEXT("3.07 Msps (48.0 kHz)"), 3072000 },	// 16 * 192 kHz			[17]
-	{ 3090000.0, TEXT("3.09 Msps"), 3090000 },
-	{ 3100000.0, TEXT("3.1 Msps"), 3100000 },
+	{ 3072000.0, TEXT("3.072 Msps (48.0 kHz, rtl_test!!!)"), 3072000 },	// 16 * 192 kHz			[17]
+	{ 3090000.0, TEXT("3.09 Msps (rtl_test!!!)"), 3090000 },
+	{ 3100000.0, TEXT("3.1 Msps (rtl_test!!!)"), 3100000 },
 #endif
 
-	{ 3200000.0, TEXT("3.2 Msps"), 3200000 }
+	{ 3200000.0, TEXT("3.2 Msps (rtl_test!!!)"), 3200000 }
 };
 
 static const int n_srates = sizeof(samplerates) / sizeof(samplerates[0]);
 
 
 static TCHAR* directS[] = {
-	TEXT("disabled: tuner I/Q"),
-	TEXT("direct sampling I"),
-	TEXT("direct sampling Q")
+	TEXT("I/Q - sampling of tuner output"),
+	TEXT("pin I: aliases 0 - 14.4 - 28.8 MHz!"),
+	TEXT("pin Q: aliases 0 - 14.4 - 28.8 MHz! (V3)")
 };
 
 
@@ -266,9 +289,11 @@ static volatile uint32_t	numTunerGains = 0;
 static volatile bool GotTunerInfo = false;
 
 
-#define MAX_DECIMATIONS		8
-
 static int maxDecimation = 0;
+
+static bool SDRsupportsLogging = false;
+static bool SDRsupportsSamplePCMU8 = false;
+static bool SDRsupportsSampleFormats = false;
 
 
 #define MAX_BUFFER_LEN	(256*1024)
@@ -292,8 +317,8 @@ static volatile int somewhat_changed = 0;	// 1 == freq
 static volatile long last_freq=100000000;
 static volatile long new_freq = 100000000;
 
-static volatile int last_srate_idx = 4;
-static volatile int new_srate_idx = 4;
+static volatile int last_srate_idx = 18;
+static volatile int new_srate_idx = 18;		// default = 2.3 MSps
 
 static volatile int last_TunerBW = 0;		// 0 == automatic, sonst in Hz
 static volatile int new_TunerBW = 0;		// n_bandwidths = bandwidths[]; nearestBwIdx()
@@ -359,6 +384,18 @@ void (* WinradCallBack)(int, int, float, void *) = NULL;
 #define WINRAD_LOCHANGE 101
 #define WINRAD_ATTCHANGE 125
 #define WINRAD_SRATES_CHANGED	137
+#define HDSDR_SAMPLE_FMT_PCMU8	126
+#define HDSDR_SAMPLE_FMT_PCM16	127
+
+// error message, with "const char*" in IQdata,
+//   intended for a log file  AND  a message box
+#define MSG_ERRDLG		148
+#define MSG_ERROR		149
+#define MSG_WARNING		150
+#define MSG_LOG			151
+#define MSG_DEBUG		152
+
+#define SDRLOG( A, TEXT )	do { if ( WinradCallBack ) WinradCallBack(-1, A, 0, TEXT ); } while (0)
 
 
 static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -456,7 +493,39 @@ bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 	name[63]=0;
 	model[15]=0;
 
+	extHWtype = exthwUSBdata16;  /* 16-bit samples */
+
+	if (!SDRsupportsSamplePCMU8)
+		extHWtype = exthwUSBdata16;  /* 16-bit samples */
+	else
+	{
+		if (MAX_DECIMATIONS == 1)
+			extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
+		else if (!SDRsupportsSampleFormats)
+			extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
+		else
+		{
+			// dynamic extSDR_supports_SampleFormats and extSDR_supports_PCMU8 supported
+			// just depends on current decimation
+			if (new_Decimation == 1)
+				extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
+			else
+				extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
+		}
+#if ALWAYS_PCMU8
+		extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
+#elif ALWAYS_PCM16
+		extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
+#endif
+	}
+
+	if (exthwUSBdata16 == extHWtype)
+		SDRLOG(MSG_DEBUG, "InitHW() with sample type PCM16");
+	else if (exthwUSBdataU8 == extHWtype)
+		SDRLOG(MSG_DEBUG, "InitHW() with sample type PCMU8");
+
 	type = extHWtype;
+
 	return TRUE;
 }
 
@@ -470,12 +539,16 @@ int LIBRTL_API __stdcall GetStatus()
 extern "C"
 bool  LIBRTL_API __stdcall OpenHW()
 {
+	SDRLOG(MSG_DEBUG, "OpenHW()");
+
 	h_dialog=CreateDialog(hInst, MAKEINTRESOURCE(IDD_RTL_SETTINGS), NULL, (DLGPROC)MainDlgProc);
 	if (h_dialog)
 		ShowWindow(h_dialog,SW_HIDE);
 
 	if (PersistentConnection)
 	{
+		SDRLOG(MSG_DEBUG, "OpenHW() starts thread (persistent connection)");
+
 		ThreadStreamToSDR = false;
 		if (Start_Thread() < 0)
 			return FALSE;
@@ -495,6 +568,21 @@ long LIBRTL_API __stdcall SetHWLO(long freq)
 extern "C"
 int LIBRTL_API __stdcall StartHW(long freq)
 {
+	char acMsg[256];
+	SDRLOG(MSG_DEBUG, "StartHW()");
+
+	if (SDRsupportsSamplePCMU8)
+		SDRLOG(MSG_DEBUG, "StartHW(): PCMU8 is supported");
+	else
+		SDRLOG(MSG_DEBUG, "StartHW(): PCMU8 is NOT supported");
+
+	if (exthwUSBdata16 == extHWtype)
+		SDRLOG(MSG_DEBUG, "StartHW(): using sample type PCM16");
+	else if (exthwUSBdataU8 == extHWtype)
+		SDRLOG(MSG_DEBUG, "StartHW(): using sample type PCMU8");
+	else
+		SDRLOG(MSG_DEBUG, "StartHW(): using 'other' sample type - NOT PCMU8 or PCM16!");
+
 	commandEverything = true;
 	ThreadStreamToSDR = true;
 	if ( Start_Thread() < 0 )
@@ -508,7 +596,14 @@ int LIBRTL_API __stdcall StartHW(long freq)
 		EnableWindow(GetDlgItem(h_dialog, IDC_DIRECT), FALSE);
 	}
 
-	return buffer_len/2;
+	// blockSize is independent of decimation!
+	// else, we get just 64 = 512 / 8 I/Q Samples with 1 kB bufferSize!
+	int numIQpairs = buffer_len / 2;
+
+	snprintf(acMsg, 255, "StartHW() = %d. Callback will deliver %d I/Q pairs per call", numIQpairs, numIQpairs);
+	SDRLOG(MSG_DEBUG, acMsg);
+
+	return numIQpairs;
 }
 
 extern "C"
@@ -522,11 +617,9 @@ extern "C"
 long LIBRTL_API __stdcall GetHWSR()
 {
 	long sr = long(samplerates[new_srate_idx].valueInt);
-	//::MessageBoxA(NULL, samplerates[new_srate_idx].name, "GetHWSR()", 0);
 #if ( FULL_DECIMATION )
 	sr /= new_Decimation;
 #endif
-
 	return sr;
 }
 
@@ -793,6 +886,8 @@ void  LIBRTL_API __stdcall ExtIoSetSetting( int idx, const char * value )
 extern "C"
 void LIBRTL_API __stdcall StopHW()
 {
+	SDRLOG(MSG_DEBUG, "StopHW()");
+
 	ThreadStreamToSDR = false;
 	if (!PersistentConnection)
 		Stop_Thread();
@@ -807,6 +902,8 @@ void LIBRTL_API __stdcall StopHW()
 extern "C"
 void LIBRTL_API __stdcall CloseHW()
 {
+	SDRLOG(MSG_DEBUG, "CloseHW()");
+
 	ThreadStreamToSDR = false;
 	Stop_Thread();
 
@@ -851,17 +948,28 @@ void LIBRTL_API __stdcall SetCallback(void (* myCallBack)(int, int, float, void 
 }
 
 extern "C"
+void LIBRTL_API  __stdcall VersionInfo(const char * progname, int ver_major, int ver_minor)
+{
+	if (!strcmp(progname, "HDSDR")
+		&& (ver_major >= 3 || (ver_major == 2 && ver_minor > 70)))
+	{
+		SDRsupportsSamplePCMU8 = true;
+		SDRLOG(MSG_DEBUG, "detected HDSDR > 2.70. => enabling PCMU8");
+	}
+}
+
+extern "C"
 void LIBRTL_API  __stdcall ExtIoSDRInfo( int extSDRInfo, int additionalValue, void * additionalPtr )
 {
-	if( extSDRInfo == extSDR_supports_PCMU8 )
-    {
-		if (MAX_DECIMATIONS == 1)
-		{
-			//This versions supports 8bit samples
-			extHWtype = exthwUSBdataU8;
-		}
-    }
-	return;
+	if (extSDRInfo == extSDR_supports_PCMU8)
+	{
+		SDRsupportsSamplePCMU8 = true;
+		SDRLOG(MSG_DEBUG, "detected SDR with PCMU8 capability => enabling PCMU8");
+	}
+	else if (extSDRInfo == extSDR_supports_Logging)
+		SDRsupportsLogging = true;
+	else if (extSDRInfo == extSDR_supports_SampleFormats)
+		SDRsupportsSampleFormats = true;
 }
 
 int Start_Thread()
@@ -931,11 +1039,13 @@ void ThreadProc(void *p)
 
 		if (connOK)
 		{
+			SDRLOG(MSG_DEBUG, "TCP connect was successful");
 			if (GUIDebugConnection)
 				::MessageBoxA(0, "TCP connect was successful", "Status", 0);
 		}
 		else
 		{
+			SDRLOG(MSG_DEBUG, "TCP connect failed! Retry ..");
 			// ::MessageBoxA(0, "TCP connect failed!\nRetry ..", "Status", 0);
 			goto label_reConnect;
 		}
@@ -964,7 +1074,10 @@ void ThreadProc(void *p)
 						&& rtl_tcp_dongle_info.ac[3] != '0' )
 					{
 						// It has to start with "RTL0"!
-						::MessageBoxA(0, "Error: Stream is not from rtl_tcp", "Error", 0);
+						if (SDRsupportsLogging)
+							SDRLOG(MSG_ERRDLG, "Error: Stream is not from rtl_tcp. Change Source!");
+						else
+							::MessageBoxA(0, "Error: Stream is not from rtl_tcp", "Error", 0);
 						hdrOK = false;
 						break;
 					}
@@ -980,7 +1093,10 @@ void ThreadProc(void *p)
 				{
 					char acMsg[256];
 					snprintf(acMsg, 255, "Socket Error %d after %d bytes in header!", (int)err, nRead);
-					::MessageBoxA(0, acMsg, "Socket Error", 0);
+					if (SDRsupportsLogging)
+						SDRLOG(MSG_ERRDLG, acMsg);
+					else
+						::MessageBoxA(0, acMsg, "Socket Error", 0);
 					hdrOK = false;
 					break;
 				}
@@ -1021,15 +1137,17 @@ void ThreadProc(void *p)
 			last_gain = new_gain + 10;
 		}
 
-		int callbackBufferBegin = 0;
-		int prevBuffer = NUM_BUFFERS_BEFORE_CALLBACK - 1;
-		int numReceivedBuffers = 0;
+		char acMsg[256];
+		int prevBufferIdx = NUM_BUFFERS_BEFORE_CALLBACK - 1;
+		int receiveBufferIdx = 0;
 		int receivedLen = 0;
+		int receiveOffset = 2 * MAX_DECIMATIONS;
 		unsigned receivedBlocks = 0;
 		int initialSrate = 1;
 		int receivedSamples = 0;
+		bool printCallbackLen = true;
 		commandEverything = true;
-		memset(&rcvBuf[prevBuffer][0], 0, MAX_BUFFER_LEN + 2*MAX_DECIMATIONS );
+		memset(&rcvBuf[prevBufferIdx][0], 0, MAX_BUFFER_LEN + 2 * MAX_DECIMATIONS);
 
 		while (!terminateThread)
 		{
@@ -1140,46 +1258,43 @@ void ThreadProc(void *p)
 			}
 
 			int32 toRead = buffer_len - receivedLen;
-			//int32 nRead = conn.Receive(toRead);
-			int32 nRead = conn.Receive(toRead, &rcvBuf[numReceivedBuffers][2*MAX_DECIMATIONS + receivedLen]);
+			int32 nRead = conn.Receive(toRead, &rcvBuf[receiveBufferIdx][receiveOffset]);
 			if (nRead > 0)
 			{
-				//uint8_t *nBuf = conn.GetData();
-				//memcpy(&rcvBuf[numReceivedBuffers][2*MAX_DECIMATIONS+receivedLen], nBuf, nRead);
 				receivedLen += nRead;
+				receiveOffset += nRead;
 				if (receivedLen >= buffer_len)
 				{
-					if (ThreadStreamToSDR)
-					{
+					// copy last MAX_DECIMATIONS I/Q samples from end of prevBufferIdx to begin of current received buffer
+					for (int k = 1; k <= 2 * MAX_DECIMATIONS; ++k)
+						rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS - k] = rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len - k];
+					prevBufferIdx = receiveBufferIdx;
 
-						++numReceivedBuffers;
-#if ( FULL_DECIMATION )
-						if (numReceivedBuffers >= new_Decimation)
-#else
-						if (numReceivedBuffers >= NUM_BUFFERS_BEFORE_CALLBACK)
-#endif
+					if (!ThreadStreamToSDR)
+					{
+						commandEverything = true;
+						receiveBufferIdx = 0;			// restart reception with 1st decimation buffer
+					}
+					else
+					{
+						++receiveBufferIdx;
+						if (receiveBufferIdx >= new_Decimation)
 						{
+							// start over with 1st decimation block - for next reception
+							receiveBufferIdx = 0;
+
 							const int n_samples_per_block = buffer_len / 2;
 							const int n_output_per_block = n_samples_per_block / new_Decimation;
-#if ( FULL_DECIMATION )
-							short *short_ptr = &short_buf[0];
-							for (int callbackBufferNo = 0; callbackBufferNo < new_Decimation; ++callbackBufferNo)
-#else
-							for (int callbackBufferNo = callbackBufferBegin; callbackBufferNo < NUM_BUFFERS_BEFORE_CALLBACK; ++callbackBufferNo)
-#endif
-							{
-#if ( FULL_DECIMATION )
-								if (new_Decimation >= 1)
-#else
-								if (new_Decimation > 1)
-#endif
-								{
-									for (int k = 1; k <= 2*new_Decimation; ++k)
-										rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - k] = rcvBuf[prevBuffer][2*MAX_DECIMATIONS + buffer_len - k];
 
+							short * short_ptr = &short_buf[0];
+							for (int callbackBufferNo = 0; callbackBufferNo < new_Decimation; ++callbackBufferNo)
+							{
+								if (new_Decimation > 1 && extHWtype == exthwUSBdata16 )
+								{
 									const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - 2*new_Decimation];
 #if ( !FULL_DECIMATION )
-									short *short_ptr = &short_buf[0];
+									// block always starts from scratch without decimation
+									short_ptr = &short_buf[0];
 #endif
 									int i;
 
@@ -1190,7 +1305,6 @@ void ThreadProc(void *p)
 	#define CHAR_PTR_INC(D)		(2);
 	#define ITER_COUNT			n_samples_per_block
 #endif
-
 									switch (new_Decimation)
 									{
 									case 1:
@@ -1265,7 +1379,13 @@ void ThreadProc(void *p)
 										break;
 									}
 #if ( !FULL_DECIMATION )
-									WinradCallBack(n_samples_per_block, 0, 0, short_buf);
+									if (printCallbackLen)
+									{
+										printCallbackLen = false;
+										snprintf(acMsg, 255, "Callback() with %d non-decimated I/Q pairs", ITER_COUNT);
+										SDRLOG(MSG_DEBUG, acMsg);
+									}
+									WinradCallBack(ITER_COUNT, 0, 0, short_buf);
 #endif
 								}
 								else
@@ -1273,36 +1393,57 @@ void ThreadProc(void *p)
 									if (extHWtype == exthwUSBdata16)
 									{
 										short *short_ptr = &short_buf[0];
-										const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][MAX_DECIMATIONS];
+										const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
 										for (int i = 0; i < buffer_len; i++)
 											*short_ptr++ = ((short)(*char_ptr++)) - 128;
+										if (printCallbackLen)
+										{
+											printCallbackLen = false;
+											snprintf(acMsg, 255, "Callback() with %d raw 16 bit I/Q pairs", n_samples_per_block);
+											SDRLOG(MSG_DEBUG, acMsg);
+										}
 										WinradCallBack(n_samples_per_block, 0, 0, short_buf);
 									}
 									else
-										WinradCallBack(n_samples_per_block, 0, 0, &rcvBuf[callbackBufferNo][MAX_DECIMATIONS]);
+									{
+										unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
+										if (printCallbackLen)
+										{
+											printCallbackLen = false;
+											snprintf(acMsg, 255, "Callback() with %d raw 8 Bit I/Q pairs", n_samples_per_block);
+											SDRLOG(MSG_DEBUG, acMsg);
+										}
+										WinradCallBack(n_samples_per_block, 0, 0, char_ptr);
+									}
 								}
-								prevBuffer = callbackBufferNo;
 							} // end for
 
 #if ( FULL_DECIMATION )
-							WinradCallBack(n_samples_per_block, 0, 0, short_buf);
-							numReceivedBuffers = callbackBufferBegin = 0;
-#else
-							numReceivedBuffers = callbackBufferBegin = NUM_BUFFERS_BEFORE_CALLBACK - 1;
+							if (new_Decimation > 1 && extHWtype == exthwUSBdata16)
+							{
+								if (printCallbackLen)
+								{
+									printCallbackLen = false;
+									snprintf(acMsg, 255, "Callback() with %d decimated I/Q pairs", n_samples_per_block);
+									SDRLOG(MSG_DEBUG, acMsg);
+								}
+								WinradCallBack(n_samples_per_block, 0, 0, short_buf);
+							}
 #endif
-
 						}
 					}
-					else
-					{
-						commandEverything = true;
-						numReceivedBuffers = callbackBufferBegin = 0;
-					}
 
+					++receivedBlocks;	// network statistics
+
+					// prepare next receive offset / length
 					receivedLen -= buffer_len;
-					++receivedBlocks;
+					receiveOffset -= buffer_len;
 					if (receivedLen > 0)
-						memcpy(&rcvBuf[0][0], &rcvBuf[0][buffer_len], receivedLen);
+					{
+						snprintf(acMsg, 255, "receivedLen - buffer_len = %d != 0", receivedLen);
+						SDRLOG(MSG_DEBUG, acMsg);
+						memcpy(&rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS], &rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len], receivedLen);
+					}
 				}
 			}
 			else
@@ -1315,7 +1456,11 @@ void ThreadProc(void *p)
 						snprintf(acMsg, 255, "Socket Error %d after %d bytes in data after %u blocks!", (int)err, receivedLen, receivedBlocks);
 					else
 						snprintf(acMsg, 255, "Socket Error %d !", (int)err);
-					::MessageBoxA(0, acMsg, "Socket Error", 0);
+
+					if (SDRsupportsLogging)
+						SDRLOG(MSG_ERRDLG, acMsg);
+					else
+						::MessageBoxA(0, acMsg, "Socket Error", 0);
 					goto label_reConnect;
 				}
 				else if (CSimpleSocket::SocketEwouldblock == err && SleepMillisWaitingForData >= 0)
@@ -1465,6 +1610,9 @@ static void updateDecimations(HWND hwndDlg)
 	// 4, 8
 	int decimationIdx = new_Decimation >> 1;
 	ComboBox_SetCurSel(hDecimation, decimationIdx);
+
+	if (MAX_DECIMATIONS == 1)
+		EnableWindow(hDecimation, FALSE);
 }
 
 
@@ -1647,8 +1795,8 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
 						int exp = 1;	
 						switch (_totupper(*endptr)) {
-							case 'K': exp = 1024; break;
-							case 'M': exp = 1024*1024; break;
+							case 'K': exp = 1000; break;
+							case 'M': exp = 1000*1000; break;
 						}
 						
 						uint32_t newrate = uint32_t( coeff * exp );
@@ -1667,7 +1815,10 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 						bufferSizeIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
 						buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
 						WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
-						::MessageBoxA(NULL, "Restart SDR application,\nthat changed buffer size has effect!", "Info", 0);
+						if (SDRsupportsLogging)
+							SDRLOG(MSG_ERRDLG, "Restart SDR application,\nthat changed buffer size has effect!");
+						else
+							::MessageBoxA(NULL, "Restart SDR application,\nthat changed buffer size has effect!", "Info", 0);
                     }
                     return TRUE;
 
@@ -1693,6 +1844,22 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 						int idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
 						new_Decimation = (idx == 0) ? 1 : (2 * idx);
 						somewhat_changed |= 512;
+
+#if ( ALWAYS_PCMU8 == 0 && ALWAYS_PCM16 == 0 )
+						if (SDRsupportsSamplePCMU8 && SDRsupportsSampleFormats)
+						{
+							if (new_Decimation == 1)
+							{
+								extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
+								WinradCallBack(-1, HDSDR_SAMPLE_FMT_PCMU8, 0, NULL);
+							}
+							else
+							{
+								extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
+								WinradCallBack(-1, HDSDR_SAMPLE_FMT_PCM16, 0, NULL);
+							}
+						}
+#endif
 
 						WinradCallBack(-1, WINRAD_SRATES_CHANGED, 0, NULL);// Signal application
 						WinradCallBack(-1, WINRAD_SRCHANGE, 0, NULL);// Signal application

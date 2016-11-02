@@ -1,20 +1,22 @@
 LIBRARY ExtIO_RTL_TCP
 EXPORTS
-CloseHW
-GetHWLO
-GetHWSR
-GetStatus
-InitHW
-OpenHW
-SetCallback
-SetHWLO
-ShowGUI
-HideGUI
-SwitchGUI
-StartHW
-StopHW
+    CloseHW
+    GetHWLO
+    GetHWSR
+    GetStatus
+    InitHW
+    OpenHW
+    SetCallback
+    SetHWLO
+    ShowGUI
+    HideGUI
+    SwitchGUI
+    StartHW
+    StopHW
+   
+    VersionInfo
+    ExtIoSDRInfo
 
-ExtIoSDRInfo
 ; Samplerate / Bandwidth:
     ExtIoGetSrates
     ExtIoGetActualSrateIdx
