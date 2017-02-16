@@ -639,6 +639,20 @@ int LIBRTL_API __stdcall ExtIoGetSrates( int srate_idx, double * samplerate )
 }
 
 extern "C"
+long LIBRTL_API __stdcall ExtIoGetBandwidth(int srate_idx)
+{
+	if (srate_idx < n_srates)
+	{
+		// ~ 3/4 of spectrum usable
+		long bw = samplerates[srate_idx].valueInt * 3L / ( new_Decimation * 4L );
+		if (new_TunerBW && new_TunerBW * 1000L < bw)
+			bw = new_TunerBW * 1000L;
+		return bw;
+	}
+	return 0;	// ERROR
+}
+
+extern "C"
 int  LIBRTL_API __stdcall ExtIoGetActualSrateIdx(void)
 {
 	return new_srate_idx;

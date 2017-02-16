@@ -19,6 +19,7 @@ EXPORTS
 
 ; Samplerate / Bandwidth:
     ExtIoGetSrates
+    ExtIoGetBandwidth
     ExtIoGetActualSrateIdx
     ExtIoSetSrate
 
