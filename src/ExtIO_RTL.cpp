@@ -146,8 +146,9 @@ const int e4k_bws[] =
 { 0, 1000, 1200, 1800, 1900, 2150, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400,   5000, 10000 };
 
 const int r820_bws[] =
-{ 0, 350, 450, 550, 700, 900, 1200, 1450, 1550, 1600, 1700, 1800, 1900, 1950, 2050, 2080, 2180, 2280, 2330, 2430, 6000, 7000, 8000 };
-
+//{ 0, 350, 450, 550, 700, 900, 1200, 1450, 1550, 1600, 1700, 1800, 1900, 1950, 2050, 2080, 2180, 2280, 2330, 2430, 6000, 7000, 8000 };
+//{ 0, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
+{ 0, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 700, 701, 800, 801, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
 
 struct tuner_gain_t
 {
@@ -1214,8 +1215,11 @@ void ThreadProc(void *p)
 
 					// re-parametrize Tuner Bandwidth
 					{
-						if (n_bandwidths)
-							transmitTcpCmd(conn, 0x0E, new_TunerBW * 1000);
+            if (n_bandwidths)
+            {
+              //transmitTcpCmd(conn, 0x0E, new_TunerBW * 1000);   // was 0x0E
+              transmitTcpCmd(conn, 0x40, new_TunerBW * 1000);   // was 0x0E
+            }
 						last_TunerBW = new_TunerBW;
 						somewhat_changed &= ~(256);
 					}
@@ -1230,9 +1234,11 @@ void ThreadProc(void *p)
 				}
 				if (last_TunerBW != new_TunerBW )
 				{
-					if (!transmitTcpCmd(conn, 0x0E, new_TunerBW*1000))
-						break;
-					last_TunerBW = new_TunerBW;
+					//if (!transmitTcpCmd(conn, 0x0E, new_TunerBW*1000))
+					//	break;
+          if (!transmitTcpCmd(conn, 0x40, new_TunerBW * 1000))
+            break;
+          last_TunerBW = new_TunerBW;
 					somewhat_changed &= ~(256);
 				}
 				if (last_TunerAGC != new_TunerAGC)
