@@ -7,6 +7,31 @@
 #include <richedit.h>
 #include "resource.h"
 
+#define VER_FILEVERSION             2020,1
+#define VER_FILEVERSION_STR         "2020.1\0"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     VER_FILEVERSION
+BEGIN
+BLOCK "StringFileInfo"
+BEGIN
+BLOCK "040904E4"
+BEGIN
+VALUE "FileDescription", "ExtIO for RTL_TCP.exe for RTL2832 based receivers\0"
+VALUE "FileVersion", VER_FILEVERSION_STR
+VALUE "LegalCopyright", "(c)Hayati Ayguen, LICENSE: GPLv2"
+VALUE "OriginalFilename", "ExtIO_RTL_TCP.dll"
+END
+END
+
+
+BLOCK "VarFileInfo"
+BEGIN
+VALUE "Translation", LANG_NEUTRAL, 1252
+END
+END
+
+
 #define Y_SOURCE            7
 #define Y_RECONNECT         ( Y_SOURCE + 28 )
 #define Y_PERSISTENT_CONN   ( Y_RECONNECT + 15 )
