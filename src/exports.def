@@ -1,6 +1,7 @@
 LIBRARY ExtIO_RTL_TCP
 EXPORTS
     CloseHW
+    GetHWLO64
     GetHWLO
     GetHWSR
     GetStatus
@@ -17,11 +18,18 @@ EXPORTS
     VersionInfo
     ExtIoSDRInfo
 
+; 
+    TuneChanged64
+    TuneChanged
+    GetTune64
+    GetTune
+
 ; Samplerate / Bandwidth:
     ExtIoGetSrates
     ExtIoGetBandwidth
     ExtIoGetActualSrateIdx
     ExtIoSetSrate
+
 
 ; Settings
     ExtIoGetSetting
@@ -31,7 +39,11 @@ EXPORTS
     GetActualAttIdx
     SetAttenuator
 
+    ExtIoGetMGCs
+    ExtIoGetActualMgcIdx
+    ExtIoSetMGC
 
 ;    ExtIoGetAGCs
 ;    ExtIoGetActualAGCidx
 ;    ExtIoSetAGC
+;    ExtIoShowMGC

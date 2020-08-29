@@ -25,6 +25,10 @@
 */
 #define FULL_DECIMATION		1
 
+#define WITH_AGCS		0
+
+#define SETTINGS_IDENTIFIER "RTL_TCP_2020.1"
+
 
 #include <stdint.h>
 #include <ActiveSocket.h>
@@ -40,6 +44,9 @@
 
 #include "resource.h"
 #include "ExtIO_RTL.h"
+
+#include "LC_ExtIO_Types.h"
+
 
 #ifdef _MSC_VER
 	#pragma warning(disable : 4996)
@@ -66,64 +73,14 @@ static int buffer_sizes[] = { //in kBytes
 #define MINRATE		900001
 
 
-//#define EXTIO_HWTYPE_16B	3
-typedef enum
-{
-    exthwNone       = 0
-  , exthwSDR14      = 1
-  , exthwSDRX       = 2
-  , exthwUSBdata16  = 3 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data must be in 16-bit  (short) format, little endian.
-                        //   each sample occupies 2 bytes (=16 bits) with values from  -2^15 to +2^15 -1
-  , exthwSCdata     = 4 // The audio data are returned via the (S)ound (C)ard managed by Winrad. The external
-                        // hardware just controls the LO, and possibly a preselector, under DLL control.
-  , exthwUSBdata24  = 5 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data are in 24-bit  integer format, little endian.
-                        //   each sample just occupies 3 bytes (=24 bits) with values from -2^23 to +2^23 -1
-  , exthwUSBdata32  = 6 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data are in 32-bit  integer format, little endian.
-                        //   each sample occupies 4 bytes (=32 bits) but with values from  -2^23 to +2^23 -1
-  , exthwUSBfloat32 = 7 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data are in 32-bit  float format, little endian.
-  , exthwHPSDR      = 8 // for HPSDR only!
-
-  // HDSDR > 2.70
-  , exthwUSBdataU8  = 9 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data must be in 8-bit  (unsigned) format, little endian.
-                        //   intended for RTL2832U based DVB-T USB sticks
-                        //   each sample occupies 1 byte (=8 bit) with values from 0 to 255
-  , exthwUSBdataS8  = 10// the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data must be in 8-bit  (signed) format, little endian.
-                        //   each sample occupies 1 byte (=8 bit) with values from -128 to 127
-  , exthwFullPCM32  = 11 // the hardware does its own digitization and the audio data are returned to Winrad
-                        // via the callback device. Data are in 32-bit  integer format, little endian.
-                        //   each sample occupies 4 bytes (=32 bits) with full range: from  -2^31 to +2^31 -1
-} extHWtypeT;
-
 #if ALWAYS_PCMU8
 extHWtypeT extHWtype = exthwUSBdataU8;	/* ExtIO type 8-bit samples */
 #else
 extHWtypeT extHWtype = exthwUSBdata16;  /* default ExtIO type 16-bit samples */
 #endif
 
-typedef enum
-{
-    extSDR_NoInfo                 = 0   // sign SDR features would be signed with subsequent calls
-  , extSDR_supports_Settings      = 1
-  , extSDR_supports_Atten         = 2   // RF Attenuation / Gain may be set via pfnSetAttenuator()
-  , extSDR_supports_TX            = 3   // pfnSetModeRxTx() may be called
-  , extSDR_controls_BP            = 4   // pfnDeactivateBP() may be called
-  , extSDR_supports_AGC           = 5   // pfnExtIoSetAGC() may be called
-  , extSDR_supports_MGC           = 6   // IF Attenuation / Gain may be set via pfnExtIoSetMGC()
-  , extSDR_supports_PCMU8         = 7   // exthwUSBdataU8 is supported
-  , extSDR_supports_PCMS8         = 8   // exthwUSBdataS8 is supported
-  , extSDR_supports_PCM32         = 9   // exthwFullPCM32 is supported
-  , extSDR_supports_Logging       = 10  // extHw_MSG_* is supported
-  , extSDR_supports_SampleFormats = 11  // extHw_SampleFormat_* is supported
-} extSDR_InfoT;
 
-
-const char * TunerName[] = { "None", "E4000", "FC0012", "FC0013", "FC2580", "R820T", "R828D" };
+const char * TunerName[] = { "None", "E4000", "FC0012", "FC0013", "FC2580", "R820T/2", "R828D" };
 static const int n_tuners = sizeof(TunerName) / sizeof(TunerName[0]);
 
 
@@ -138,6 +95,8 @@ const int fc13_gains[] =
 const int r820t_gains[] =
 { 0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254, 280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496 };
 
+const int r820t_if_gains[] =
+{ -47, -21, 5, 35, 77, 112, 136, 149, 163, 195, 231, 265, 300, 337, 372, 408 };
 
 // mix: 1900, 2300, 2700, 3300, 3400,
 // rc: 1000, 1200, 1800, 2600, 3400,
@@ -148,14 +107,19 @@ const int e4k_bws[] =
 const int r820_bws[] =
 //{ 0, 350, 450, 550, 700, 900, 1200, 1450, 1550, 1600, 1700, 1800, 1900, 1950, 2050, 2080, 2180, 2280, 2330, 2430, 6000, 7000, 8000 };
 //{ 0, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
-{ 0, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 700, 701, 800, 801, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
+//{ 0, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 700, 701, 800, 801, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
+{ 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1300, 1500, 1600, 1750, 1950, 6000 /*, 7000, 8000 */ };
+//{ 0, 201, 202, 290, 301, 302, 375, 401, 402, 420, 470, 501, 502, 600, 601, 602, 701, 702, 801, 802, 860, 901, 950, 1001, 1100, 1101, 1201, 1300, 1301, 1503, 1600, 1753, 1953, 6000, 7000, 8000 };
+//{ 0, 202, 290, 302, 375, 420, 470, 502, 600, 602, 701, 702, 801, 802, 860, 901, 950, 1001, 1100, 1101, 1201, 1300, 1301, 1503, 1600, 1753, 1953, 6000, 7000, 8000 };
 
 struct tuner_gain_t
 {
 	const int * gain;	// 0.1 dB steps: gain in dB = gain[] / 10
 	const int num;
-}
-tuner_gains[]
+};
+
+
+static tuner_gain_t tuner_rf_gains[]
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { e4k_gains, sizeof(e4k_gains) / sizeof(e4k_gains[0]) }
@@ -165,6 +129,18 @@ tuner_gains[]
 , { r820t_gains, sizeof(r820t_gains) / sizeof(r820t_gains[0]) }
 , { 0, 0 }	// R828D
 };
+
+static tuner_gain_t tuner_if_gains[]
+{
+  { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
+, { 0, 0 }  // E4000
+, { 0, 0 }  // FC012
+, { 0, 0 }  // FC013
+, { 0, 0 }	// FC2580
+, { r820t_if_gains, sizeof(r820t_if_gains) / sizeof(r820t_if_gains[0]) }
+, { 0, 0 }	// R828D
+};
+
 
 struct tuner_bw_t
 {
@@ -195,37 +171,37 @@ static sr_t samplerates[] = {
 #if 1
 	{ 225001.0, TEXT("0.225 Msps"), 225001 },				// [0]
 	{ 250000.0, TEXT("0.25 Msps"), 250000 },				// [1]
-	{ 264600.0, TEXT("0.265 Msps (44.1 kHz)"), 264600 },	// [2]
-	{ 288000.0, TEXT("0.288 Msps (48.0 kHz)"), 288000 },	// [3]
+	{ 264600.0, TEXT("0.265 Msps ( 88.2 kHz)"), 264600 },	// [2]
+	{ 288000.0, TEXT("0.288 Msps ( 96.0 kHz)"), 288000 },	// [3]
 	{ 300000.0, TEXT("0.3 Msps"), 300000 },					// [4]
 #endif
 
-	{  960000.0, TEXT("0.96 kSps (48.0 kHz)"),  960000 },	// = 5 * 192 kHz		[5]
+	{  960000.0, TEXT("0.96 kSps (192.0 kHz)"),  960000 },	// = 5 * 192 kHz		[5]
 
 	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },				// [6]
 
-	{ 1058400.0, TEXT("1.058 Msps (44.1 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[7]
-	{ 1152000.0, TEXT("1.152 Msps (48.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[8]
+	{ 1058400.0, TEXT("1.058 Msps (176.4 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[7]
+	{ 1152000.0, TEXT("1.152 Msps (192.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[8]
 
 	//{ 1200000.0, TEXT("1.20 Msps"),  1200000 },
-	{ 1234800.0, TEXT("1.234 Msps (44.1 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[9]
-	{ 1344000.0, TEXT("1.344 Msps (48.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[10]
+	{ 1234800.0, TEXT("1.234 Msps (176.4 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[9]
+	{ 1344000.0, TEXT("1.344 Msps (192.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[10]
 
-	{ 1411200.0, TEXT("1.411 Msps (44.1 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[11]
+	{ 1411200.0, TEXT("1.411 Msps (176.4 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[11]
 
 	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },				// [12]
 
-	{ 1536000.0, TEXT("1.536 Msps (48.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[13]
+	{ 1536000.0, TEXT("1.536 Msps (192.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[13]
 
-	{ 1764000.0, TEXT("1.764 Msps (44.1 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[14]
+	{ 1764000.0, TEXT("1.764 Msps (176.4 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[14]
 
 	//{ 1800000.0, TEXT("1.8 Msps"), 1800000 },
-	{ 1920000.0, TEXT("1.92 Msps (48.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[15]
+	{ 1920000.0, TEXT("1.92 Msps (192.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[15]
 
 	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },				// [16]
 
-	{ 2116800.0, TEXT("2.116 Msps (44.1 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[17]
-	{ 2304000.0, TEXT("2.304 Msps (48.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[18]
+	{ 2116800.0, TEXT("2.116 Msps (176.4 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[17]
+	{ 2304000.0, TEXT("2.304 Msps (192.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[18]
 
 	{ 2400000.0, TEXT("2.4 Msps"),  2400000 },
 
@@ -235,18 +211,21 @@ static sr_t samplerates[] = {
 
 	{ 2500000.0, TEXT("2.50 Msps (rtl_test!)"), 2500000 },				// [20]
 
-	{ 2646000.0, TEXT("2.646 Msps (44.1 kHz, rtl_test!)"), 2646000 },	// = 15 * 176.4 kHz		[21]
+	{ 2560000.0, TEXT("2.56 Msps"), 2560000 },				// [21]
 
-	{ 2688000.0, TEXT("2.688 Msps (48.0 kHz, rtl_test!)"), 2688000 },	// = 14 * 192 kHz		[22]
 
-	{ 2822400.0, TEXT("2.822 Msps (44.1 kHz, rtl_test!)"), 2822400 },	// = 16 * 176.4 kHz		[23]
+	{ 2646000.0, TEXT("2.646 Msps (44.1 kHz, rtl_test!)"), 2646000 },	// = 15 * 176.4 kHz		[22]
 
-	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz, rtl_test!)"), 2880000 },	// = 15 * 192 kHz		[24]
+	{ 2688000.0, TEXT("2.688 Msps (48.0 kHz, rtl_test!)"), 2688000 },	// = 14 * 192 kHz		[23]
+
+	{ 2822400.0, TEXT("2.822 Msps (44.1 kHz, rtl_test!)"), 2822400 },	// = 16 * 176.4 kHz		[24]
+
+	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz, rtl_test!)"), 2880000 },	// = 15 * 192 kHz		[25]
 
 #if 0
 	{ 3000000.0, TEXT("3.00 Msps (rtl_test!!!)"), 3000000 },
 
-	{ 3072000.0, TEXT("3.072 Msps (48.0 kHz, rtl_test!!!)"), 3072000 },	// 16 * 192 kHz			[17]
+	{ 3072000.0, TEXT("3.072 Msps (192.0 kHz, rtl_test!!!)"), 3072000 },	// 16 * 192 kHz			[17]
 	{ 3090000.0, TEXT("3.09 Msps (rtl_test!!!)"), 3090000 },
 	{ 3100000.0, TEXT("3.1 Msps (rtl_test!!!)"), 3100000 },
 #endif
@@ -267,8 +246,11 @@ static TCHAR* directS[] = {
 static const int * bandwidths = 0;
 static int n_bandwidths = 0;			// tuner_bws[]
 
-static const int * gains = 0;
-static int n_gains = 0;			// tuner_gains[]
+static const int * rf_gains = 0;
+static int n_rf_gains = 0;			// tuner_rf_gains[]
+
+static const int * if_gains = 0;
+static int n_if_gains = 0;			// tuner_if_gains[]
 
 
 static union
@@ -304,19 +286,30 @@ static bool rcvBufsAllocated = false;
 static short * short_buf = 0;
 static uint8_t * rcvBuf[NUM_BUFFERS_BEFORE_CALLBACK + 1] = { 0 };
 
-static volatile int somewhat_changed = 0;	// 1 == freq
-											// 2 == srate
-											// 4 == gain
-											// 8 == tuner agc
-											// 16 == rtl agc
-											// 32 == direct sampling mode
-											// 64 == offset Tuning (E4000)
-											// 128 == freq corr ppm
-											// 256 == tuner bandwidth
-											// 512 == decimation
+static volatile int somewhat_changed = 0;
+    // 1 == freq
+    // 2 == srate
+    // 4 == gain
+    // 8 == tuner rf agc
+    // 16 == rtl agc
+    // 32 == direct sampling mode
+    // 64 == offset Tuning (E4000)
+    // 128 == freq corr ppm
+    // 256 == tuner bandwidth
+    // 512 == decimation
+    // 1024 == tuner sideband
+    // 2048 == tuner band center
+    // 4096 == tuner if agc / if gain
 
-static volatile long last_freq=100000000;
-static volatile long new_freq = 100000000;
+static volatile int64_t last_LO_freq = 100000000;
+static volatile int64_t new_LO_freq = 100000000;
+
+static volatile int64_t old_tuneFreq = 0;
+static volatile int64_t new_tuneFreq = 0;  // absolute (RF) frequency of tuned frequency
+
+static volatile int64_t retune_value = 0;
+static int retune_counter = 0;
+static volatile bool retune_freq = false;
 
 static volatile int last_srate_idx = 18;
 static volatile int new_srate_idx = 18;		// default = 2.3 MSps
@@ -327,20 +320,38 @@ static volatile int new_TunerBW = 0;		// n_bandwidths = bandwidths[]; nearestBwI
 static volatile int last_Decimation = 0;
 static volatile int new_Decimation = 0;
 
-static volatile int last_gain = 1;
-static volatile int new_gain = 1;
+static volatile int last_rf_gain = 1;
+static volatile int new_rf_gain = 1;
 
-static volatile int last_TunerAGC = 1;	// 0 == off/manual, 1 == on/automatic
-static volatile int new_TunerAGC = 1;
+static volatile int last_if_gain = 1;
+static volatile int new_if_gain = 1;
 
-static volatile int last_RTLAGC = 0;
-static volatile int new_RTLAGC = 0;
+static volatile int last_if_gain_idx = 1;
+static volatile int new_if_gain_idx = 1;
+
+static volatile int last_TunerRF_AGC = 1;	// 0 == off/manual, 1 == on/automatic
+static volatile int new_TunerRF_AGC = 1;
+
+static volatile int last_TunerIF_AGC = 1;	// 0 == off/manual, 1 == on/automatic
+static volatile int new_TunerIF_AGC = 1;
+
+static volatile int last_RTLAGC = 1;
+static volatile int new_RTLAGC = 1;
 
 static volatile int last_DirectSampling = 0;
 static volatile int new_DirectSampling = 0;
 
+static volatile int last_BandCenter_Sel = 0;
+static volatile int new_BandCenter_Sel = 0;
+
+static volatile int last_BandCenter_LO_Delta = 0;
+static volatile int new_BandCenter_LO_Delta = 0;
+
 static volatile int last_OffsetTuning = 0;
 static volatile int new_OffsetTuning = 0;
+
+static volatile int last_USB_Sideband = 0;
+static volatile int new_USB_Sideband = 0;
 
 static volatile int last_FreqCorrPPM = 0;
 static volatile int new_FreqCorrPPM = 0;
@@ -355,7 +366,7 @@ static int RTL_TCP_PortNo = 1234;
 static volatile int AutoReConnect = 1;
 static volatile int PersistentConnection = 1;
 
-static int ASyncConnection = 1;
+static int ASyncSocketIO = 1;
 static int SleepMillisWaitingForData = 1;
 
 static int HDSDR_AGC=2;
@@ -380,23 +391,11 @@ int Start_Thread();
 int Stop_Thread();
 
 /* ExtIO Callback */
-void (* WinradCallBack)(int, int, float, void *) = NULL;
-#define WINRAD_SRCHANGE 100
-#define WINRAD_LOCHANGE 101
-#define WINRAD_ATTCHANGE 125
-#define WINRAD_SRATES_CHANGED	137
-#define HDSDR_SAMPLE_FMT_PCMU8	126
-#define HDSDR_SAMPLE_FMT_PCM16	127
+extern pfnExtIOCallback gpfnExtIOCallbackPtr = NULL;
 
 // error message, with "const char*" in IQdata,
 //   intended for a log file  AND  a message box
-#define MSG_ERRDLG		148
-#define MSG_ERROR		149
-#define MSG_WARNING		150
-#define MSG_LOG			151
-#define MSG_DEBUG		152
-
-#define SDRLOG( A, TEXT )	do { if ( WinradCallBack ) WinradCallBack(-1, A, 0, TEXT ); } while (0)
+#define SDRLOG( A, TEXT )	do { if ( gpfnExtIOCallbackPtr ) gpfnExtIOCallbackPtr(-1, A, 0, TEXT ); } while (0)
 
 
 static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -457,27 +456,27 @@ static int nearestBwIdx(int bw)
 	return nearest_idx;
 }
 
-static int nearestGainIdx(int gain)
+static int nearestGainIdx(int gain, const int * gains, const int n_gains)
 {
-	if (n_gains <= 0)
-		return 0;
-	else if (gain <= gains[0])
-		return 0;
-	else if (gain >= gains[n_gains - 1])
-		return n_gains - 1;
-
-	int nearest_idx = 0;
-	int nearest_dist = 10000000;
-	for (int idx = 0; idx < n_gains; ++idx)
-	{
-		int dist = abs(gain - gains[idx]);
-		if (dist < nearest_dist)
-		{
-			nearest_idx = idx;
-			nearest_dist = dist;
-		}
-	}
-	return nearest_idx;
+    if (n_gains <= 0)
+        return 0;
+    else if (gain <= gains[0])
+        return 0;
+    else if (gain >= gains[n_gains - 1])
+        return n_gains - 1;
+    
+    int nearest_idx = 0;
+    int nearest_dist = 10000000;
+    for (int idx = 0; idx < n_gains; ++idx)
+    {
+        int dist = abs(gain - gains[idx]);
+        if (dist < nearest_dist)
+        {
+            nearest_idx = idx;
+            nearest_dist = dist;
+        }
+    }
+    return nearest_idx;
 }
 
 
@@ -508,7 +507,7 @@ bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 		{
 			// dynamic extSDR_supports_SampleFormats and extSDR_supports_PCMU8 supported
 			// just depends on current decimation
-			if (new_Decimation == 1)
+			if (new_Decimation <= 1)
 				extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
 			else
 				extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
@@ -521,9 +520,9 @@ bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 	}
 
 	if (exthwUSBdata16 == extHWtype)
-		SDRLOG(MSG_DEBUG, "InitHW() with sample type PCM16");
+		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCM16");
 	else if (exthwUSBdataU8 == extHWtype)
-		SDRLOG(MSG_DEBUG, "InitHW() with sample type PCMU8");
+		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCMU8");
 
 	type = extHWtype;
 
@@ -540,7 +539,7 @@ int LIBRTL_API __stdcall GetStatus()
 extern "C"
 bool  LIBRTL_API __stdcall OpenHW()
 {
-	SDRLOG(MSG_DEBUG, "OpenHW()");
+	SDRLOG(extHw_MSG_DEBUG, "OpenHW()");
 
 	h_dialog=CreateDialog(hInst, MAKEINTRESOURCE(IDD_RTL_SETTINGS), NULL, (DLGPROC)MainDlgProc);
 	if (h_dialog)
@@ -548,7 +547,7 @@ bool  LIBRTL_API __stdcall OpenHW()
 
 	if (PersistentConnection)
 	{
-		SDRLOG(MSG_DEBUG, "OpenHW() starts thread (persistent connection)");
+		SDRLOG(extHw_MSG_DEBUG, "OpenHW() starts thread (persistent connection)");
 
 		ThreadStreamToSDR = false;
 		if (Start_Thread() < 0)
@@ -561,28 +560,55 @@ bool  LIBRTL_API __stdcall OpenHW()
 extern "C"
 long LIBRTL_API __stdcall SetHWLO(long freq)
 {
-	new_freq = freq;
+  new_LO_freq = freq; // +new_BandCenter_LO_Delta;
 	somewhat_changed |= 1;
 	return 0;
 }
+
+static FILE * tuneFile = NULL;
+
+extern "C"
+void LIBRTL_API __stdcall TuneChanged64(int64_t tunefreq)
+{
+  new_tuneFreq = tunefreq;
+}
+
+extern "C"
+void LIBRTL_API __stdcall TuneChanged(long tunefreq)
+{
+  new_tuneFreq = tunefreq;
+}
+
+extern "C"
+int64_t LIBRTL_API __stdcall GetTune64(void)
+{
+  return new_tuneFreq;
+}
+
+extern "C"
+long LIBRTL_API __stdcall GetTune(void)
+{
+  return (long)(new_tuneFreq);
+}
+
 
 extern "C"
 int LIBRTL_API __stdcall StartHW(long freq)
 {
 	char acMsg[256];
-	SDRLOG(MSG_DEBUG, "StartHW()");
+	SDRLOG(extHw_MSG_DEBUG, "StartHW()");
 
 	if (SDRsupportsSamplePCMU8)
-		SDRLOG(MSG_DEBUG, "StartHW(): PCMU8 is supported");
+		SDRLOG(extHw_MSG_DEBUG, "StartHW(): PCMU8 is supported");
 	else
-		SDRLOG(MSG_DEBUG, "StartHW(): PCMU8 is NOT supported");
+		SDRLOG(extHw_MSG_DEBUG, "StartHW(): PCMU8 is NOT supported");
 
 	if (exthwUSBdata16 == extHWtype)
-		SDRLOG(MSG_DEBUG, "StartHW(): using sample type PCM16");
+		SDRLOG(extHw_MSG_DEBUG, "StartHW(): using sample type PCM16");
 	else if (exthwUSBdataU8 == extHWtype)
-		SDRLOG(MSG_DEBUG, "StartHW(): using sample type PCMU8");
+		SDRLOG(extHw_MSG_DEBUG, "StartHW(): using sample type PCMU8");
 	else
-		SDRLOG(MSG_DEBUG, "StartHW(): using 'other' sample type - NOT PCMU8 or PCM16!");
+		SDRLOG(extHw_MSG_DEBUG, "StartHW(): using 'other' sample type - NOT PCMU8 or PCM16!");
 
 	commandEverything = true;
 	ThreadStreamToSDR = true;
@@ -602,15 +628,22 @@ int LIBRTL_API __stdcall StartHW(long freq)
 	int numIQpairs = buffer_len / 2;
 
 	snprintf(acMsg, 255, "StartHW() = %d. Callback will deliver %d I/Q pairs per call", numIQpairs, numIQpairs);
-	SDRLOG(MSG_DEBUG, acMsg);
+	SDRLOG(extHw_MSG_DEBUG, acMsg);
 
 	return numIQpairs;
+}
+
+
+extern "C"
+int64_t LIBRTL_API __stdcall GetHWLO64()
+{
+  return new_LO_freq;
 }
 
 extern "C"
 long LIBRTL_API __stdcall GetHWLO()
 {
-	return new_freq;
+  return (long)new_LO_freq;
 }
 
 
@@ -662,75 +695,126 @@ int  LIBRTL_API __stdcall ExtIoGetActualSrateIdx(void)
 extern "C"
 int  LIBRTL_API __stdcall ExtIoSetSrate( int srate_idx )
 {
-	if (srate_idx >= 0 && srate_idx < n_srates)
-	{
-		new_srate_idx = srate_idx;
-		somewhat_changed |= 2;
-		if (h_dialog)
-			ComboBox_SetCurSel(GetDlgItem(h_dialog,IDC_SAMPLERATE),srate_idx);
-		WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
-		return 0;
-	}
-	return 1;	// ERROR
+    if (srate_idx >= 0 && srate_idx < n_srates)
+    {
+        new_srate_idx = srate_idx;
+        somewhat_changed |= 2;
+        if (h_dialog)
+            ComboBox_SetCurSel(GetDlgItem(h_dialog,IDC_SAMPLERATE),srate_idx);
+        EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SampleRate);  // Signal application
+        return 0;
+    }
+    return 1;	// ERROR
 }
 
 extern "C"
 int  LIBRTL_API __stdcall GetAttenuators( int atten_idx, float * attenuation )
 {
-	if ( atten_idx < n_gains )
-	{
-		*attenuation= gains[atten_idx]/10.0F;
-		return 0;
-	}
-	return 1;	// End or Error
+    if ( atten_idx < n_rf_gains )
+    {
+        *attenuation= rf_gains[atten_idx]/10.0F;
+        return 0;
+    }
+    return 1;	// End or Error
 }
 
 extern "C"
 int  LIBRTL_API __stdcall GetActualAttIdx(void)
 {
-	for (int i=0;i<n_gains;i++)
-		if (new_gain==gains[i])
-			return i;
-	return -1;
+    for (int i=0;i<n_rf_gains;i++)
+        if (new_rf_gain == rf_gains[i])
+            return i;
+    return -1;
 }
 
 extern "C"
 int  LIBRTL_API __stdcall SetAttenuator( int atten_idx )
 {
-	if ( atten_idx<0 || atten_idx > n_gains )
-		return -1;
+    if ( atten_idx<0 || atten_idx > n_rf_gains )
+        return -1;
 
-	int pos=gains[atten_idx];
+    int pos=rf_gains[atten_idx];
 
-	if (h_dialog)
-	{
-		SendMessage(GetDlgItem(h_dialog, IDC_GAIN), TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
+    if (h_dialog)
+    {
+        SendMessage(GetDlgItem(h_dialog, IDC_RF_GAIN_SLIDER), TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
+        
+        if (Button_GetCheck(GetDlgItem(h_dialog, IDC_TUNER_RF_AGC)) == BST_UNCHECKED)
+        {
+            TCHAR str[255];
+            _stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
+            Static_SetText(GetDlgItem(h_dialog, IDC_TUNER_RF_GAIN_VALUE), str);
+            new_rf_gain = pos;
+            somewhat_changed |= 4;
+        }
+    }
 
-		if (Button_GetCheck(GetDlgItem(h_dialog, IDC_TUNERAGC)) == BST_UNCHECKED)
-		{
-			TCHAR str[255];
-			_stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
-			Static_SetText(GetDlgItem(h_dialog, IDC_GAINVALUE), str);
-			new_gain = pos;
-			somewhat_changed |= 4;
-		}
-	}
-	new_gain=pos;
-	return 0;
+    new_rf_gain = pos;
+    return 0;
 }
+
+
+extern "C"
+int  LIBRTL_API __stdcall ExtIoGetMGCs(int mgc_idx, float * gain)
+{
+    if ( mgc_idx < n_if_gains )
+    {
+        *gain= if_gains[mgc_idx]/10.0F;
+        return 0;
+    }
+    return 1;	// End or Error
+}
+
+extern "C"
+int  LIBRTL_API __stdcall ExtIoGetActualMgcIdx(void)
+{
+    for (int i=0;i<n_if_gains;i++)
+        if (new_if_gain == if_gains[i])
+            return i;
+    return -1;
+}
+
+extern "C"
+int  LIBRTL_API __stdcall ExtIoSetMGC(int mgc_idx)
+{
+    if ( mgc_idx<0 || mgc_idx > n_if_gains )
+        return -1;
+
+    int pos=if_gains[mgc_idx];
+
+    if (h_dialog)
+    {
+        SendMessage(GetDlgItem(h_dialog, IDC_IF_GAIN_SLIDER), TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
+        
+        if (Button_GetCheck(GetDlgItem(h_dialog, IDC_TUNER_IF_AGC)) == BST_UNCHECKED)
+        {
+            TCHAR str[255];
+            _stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
+            Static_SetText(GetDlgItem(h_dialog, IDC_TUNER_IF_GAIN_VALUE), str);
+        }
+    }
+
+    new_if_gain = pos;
+    new_if_gain_idx = mgc_idx;
+    somewhat_changed |= 4096;
+    return 0;
+
+}
+
+
+#if WITH_AGCS
 
 extern "C"
 int   LIBRTL_API __stdcall ExtIoGetAGCs( int agc_idx, char * text )
 {
-	switch ( agc_idx )
-	{
-		case 0:	snprintf( text, 16, "%s", "None" );			return 0;
-		case 1:	snprintf( text, 16, "%s", "Tuner AGC" );	return 0;
-		case 2:	snprintf( text, 16, "%s", "RTL AGC" );		return 0;
-		case 3:	snprintf( text, 16, "%s", "RTL+Tuner AGC" );	return 0;
-		default:	return -1;	// ERROR
-	}
-	return -1;	// ERROR
+    switch ( agc_idx )
+    {
+        case 0:   snprintf( text, 16, "%s", "IF" );      return 0;
+        case 1:   snprintf( text, 16, "%s", "RF:A IF" ); return 0;
+        case 2:   snprintf( text, 16, "%s", "AGC" );     return 0;
+        default:  return -1;	// ERROR
+    }
+    return -1;	// ERROR
 }
 
 extern "C"
@@ -742,166 +826,279 @@ int   LIBRTL_API __stdcall ExtIoGetActualAGCidx (void)
 extern "C"
 int   LIBRTL_API __stdcall ExtIoSetAGC (int agc_idx)
 {
-	HDSDR_AGC = agc_idx;
-	return 0;
+    WPARAM RF_val = BST_UNCHECKED; // BST_CHECKED;
+    WPARAM IF_val = BST_UNCHECKED; // BST_CHECKED;
+    //WPARAM DIG_val = BST_UNCHECKED; // BST_CHECKED;
+    HDSDR_AGC = agc_idx;
+    switch ( agc_idx )
+    {
+        case 0:   break; // "IF"  
+        case 1:   RF_val = BST_CHECKED;  break; // "RF:A IF"
+        default:
+        case 2:   RF_val = IF_val = BST_CHECKED;  break;  // "AGC"
+    }
+    SendMessage(GetDlgItem(h_dialog, IDC_TUNER_RF_AGC), BM_SETCHECK, RF_val, NULL);
+    SendMessage(GetDlgItem(h_dialog, IDC_TUNER_IF_AGC), BM_SETCHECK, IF_val, NULL);
+    //SendMessage(GetDlgItem(h_dialog, IDC_RTL_DIG_AGC), BM_SETCHECK, DIG_val, NULL);
+    return 0;
 }
+
+extern "C"
+int   LIBRTL_API __stdcall ExtIoShowMGC(int agc_idx)
+{
+    // return 1 - shows MGC == IF slider
+    switch ( agc_idx )
+    {
+        default:
+        case 0:   return 1;  // "IF"  
+        case 1:   return 1;  // "RF AGC IF"
+        case 2:   return 0;  // "RF+IF AGC"
+    }
+}
+
+#endif /* WITH_AGCS */
+
+//---------------------------------------------------------------------------
+
+enum class Setting {
+  ID = 0
+, RTL_TCP_IP
+, RTL_TCP_PORTNO
+, AUTO_RECONNECT
+, PERSISTENT_CONN
+, SRATE_IDX
+, TUNER_BW
+, TUNER_RF_AGC
+, RTL_DIG_AGC
+, CALIB_PPM
+, MANUAL_RF_GAIN
+, BUFFER_SIZE_IDX
+, E4K_OFFSET_TUNE
+, DIRECT_SAMPLING_MODE
+, ASYNC_SOCKET_IO
+, SLEEP_MILLIS_FOR_DATA
+, DECIMATION
+, TUNER_IF_AGC              // int new_TunerIF_AGC = 1
+, MANUAL_IF_GAIN_IDX        // int new_if_gain_idx = 1
+, MANUAL_IF_GAIN_VAL        // int new_if_gain = 1
+, R820T_BAND_CENTER_SEL     // int new_BandCenter_Sel = 0
+, R820T_BAND_CENTER_DELTA   // int new_BandCenter_LO_Delta = 0
+, R820T_USB_SIDEBAND        // int new_USB_Sideband = 0
+, NUM   // Last One == Amount
+};
 
 
 extern "C"
 int   LIBRTL_API __stdcall ExtIoGetSetting( int idx, char * description, char * value )
 {
-	switch (idx)
-	{
-	case 0:
-		snprintf(description, 1024, "%s", "RTL_TCP IP-Address");
-		snprintf(value, 1024, "%s", RTL_TCP_IPAddr);
-		return 0;
-	case 1:
-		snprintf(description, 1024, "%s", "RTL_TCP Portnumber");
-		snprintf(value, 1024, "%d", RTL_TCP_PortNo);
-		return 0;
-	case 2:
-		snprintf(description, 1024, "%s", "Automatic_ReConnect");
-		snprintf(value, 1024, "%d", AutoReConnect);
-		return 0;
-	case 3:
-		snprintf(description, 1024, "%s", "Persistent_Connection");
-		snprintf(value, 1024, "%d", PersistentConnection);
-		return 0;
-	case 4:
-		snprintf( description, 1024, "%s", "SampleRateIdx" );
-		snprintf(value, 1024, "%d", new_srate_idx);
-		return 0;
-	case 5:
-		snprintf(description, 1024, "%s", "TunerBandwidth in kHz (only few tuner models) - 0 for automatic");
-		snprintf(value, 1024, "%d", new_TunerBW);
-		return 0;
-	case 6:
-		snprintf( description, 1024, "%s", "Tuner_AGC" );
-		snprintf(value, 1024, "%d", new_TunerAGC);
-		return 0;
-	case 7:
-		snprintf( description, 1024, "%s", "RTL_AGC" );
-		snprintf(value, 1024, "%d", new_RTLAGC);
-		return 0;
-	case 8:
-		snprintf( description, 1024, "%s", "Frequency_Correction" );
-		snprintf(value, 1024, "%d", new_FreqCorrPPM);
-		return 0;
-	case 9:
-		snprintf( description, 1024, "%s", "Tuner_Gain" );
-		snprintf(value, 1024, "%d", new_gain);
-		return 0;
-	case 10:
-		snprintf( description, 1024, "%s", "Buffer_Size" );
-		snprintf(value, 1024, "%d", bufferSizeIdx);
-		return 0;
-	case 11:
-		snprintf( description, 1024, "%s", "Offset_Tuning" );
-		snprintf(value, 1024, "%d", new_OffsetTuning);
-		return 0;
-	case 12:
-		snprintf( description, 1024, "%s", "Direct_Sampling" );
-		snprintf(value, 1024, "%d", new_DirectSampling);
-		return 0;
-	case 13:
-		snprintf(description, 1024, "%s", "Use Asynchronous I/O on Socket connection");
-		snprintf(value, 1024, "%d", ASyncConnection);
-		return 0;
-	case 14:
-		snprintf(description, 1024, "%s", "number of Milliseconds to Sleep before trying to receive new data");
-		snprintf(value, 1024, "%d", SleepMillisWaitingForData);
-		return 0;
-	case 15:
-		snprintf(description, 1024, "%s", "Decimation Factor for Sample Rate");
-		snprintf(value, 1024, "%d", new_Decimation);
-		return 0;
-	default:
-		return -1;	// ERROR
-	}
+  switch (idx)
+  {
+  case Setting::ID:
+    snprintf( description, 1024, "%s", "Identifier" );
+    snprintf( value, 1024, "%s", SETTINGS_IDENTIFIER );
+    return 0;
+  case Setting::RTL_TCP_IP:
+    snprintf(description, 1024, "%s", "RTL_TCP IP-Address");
+    snprintf(value, 1024, "%s", RTL_TCP_IPAddr);
+    return 0;
+  case Setting::RTL_TCP_PORTNO:
+    snprintf(description, 1024, "%s", "RTL_TCP Portnumber");
+    snprintf(value, 1024, "%d", RTL_TCP_PortNo);
+    return 0;
+  case Setting::AUTO_RECONNECT:
+    snprintf(description, 1024, "%s", "Automatic_ReConnect");
+    snprintf(value, 1024, "%d", AutoReConnect);
+    return 0;
+  case Setting::PERSISTENT_CONN:
+    snprintf(description, 1024, "%s", "Persistent_Connection");
+    snprintf(value, 1024, "%d", PersistentConnection);
+    return 0;
+  case Setting::SRATE_IDX:
+    snprintf( description, 1024, "%s", "SampleRateIdx" );
+    snprintf(value, 1024, "%d", new_srate_idx);
+    return 0;
+  case Setting::TUNER_BW:
+    snprintf(description, 1024, "%s", "TunerBandwidth in kHz (only few tuner models) - 0 for automatic");
+    snprintf(value, 1024, "%d", new_TunerBW);
+    return 0;
+  case Setting::TUNER_RF_AGC:
+    snprintf( description, 1024, "%s", "Tuner_RF_AGC" );
+    snprintf(value, 1024, "%d", new_TunerRF_AGC);
+    return 0;
+  case Setting::RTL_DIG_AGC:
+    snprintf( description, 1024, "%s", "RTL_AGC" );
+    snprintf(value, 1024, "%d", new_RTLAGC);
+    return 0;
+  case Setting::CALIB_PPM:
+    snprintf( description, 1024, "%s", "Frequency_Correction" );
+    snprintf(value, 1024, "%d", new_FreqCorrPPM);
+    return 0;
+  case Setting::MANUAL_RF_GAIN:
+    snprintf( description, 1024, "%s", "Tuner_RF_Gain" );
+    snprintf(value, 1024, "%d", new_rf_gain);
+    return 0;
+  case Setting::BUFFER_SIZE_IDX:
+    snprintf( description, 1024, "%s", "Buffer_Size" );
+    snprintf(value, 1024, "%d", bufferSizeIdx);
+    return 0;
+  case Setting::E4K_OFFSET_TUNE:
+    snprintf( description, 1024, "%s", "Tuner-E4000_Offset_Tuning" );
+    snprintf(value, 1024, "%d", new_OffsetTuning);
+    return 0;
+  case Setting::DIRECT_SAMPLING_MODE:
+    snprintf( description, 1024, "%s", "Direct_Sampling" );
+    snprintf(value, 1024, "%d", new_DirectSampling);
+    return 0;
+  case Setting::ASYNC_SOCKET_IO:
+    snprintf(description, 1024, "%s", "Use Asynchronous I/O on Socket connection");
+    snprintf(value, 1024, "%d", ASyncSocketIO);
+    return 0;
+  case Setting::SLEEP_MILLIS_FOR_DATA:
+    snprintf(description, 1024, "%s", "number of Milliseconds to Sleep before trying to receive new data");
+    snprintf(value, 1024, "%d", SleepMillisWaitingForData);
+    return 0;
+  case Setting::DECIMATION:
+    snprintf(description, 1024, "%s", "Decimation Factor for Sample Rate");
+    snprintf(value, 1024, "%d", new_Decimation);
+    return 0;
+
+  case Setting::TUNER_IF_AGC:             // int new_TunerIF_AGC = 1
+    snprintf(description, 1024, "%s", "R820T/2_IF_AGC");
+    snprintf(value, 1024, "%d", new_TunerIF_AGC);
+    return 0;
+  case Setting::MANUAL_IF_GAIN_IDX:       // int new_if_gain_idx = 1
+    snprintf(description, 1024, "%s", "R820T/2_manual_IF_GAIN_idx");
+    snprintf(value, 1024, "%d", new_if_gain_idx);
+    return 0;
+  case Setting::MANUAL_IF_GAIN_VAL:       // int new_if_gain = 1
+    snprintf(description, 1024, "%s", "R820T/2_manual_IF_GAIN_value");
+    snprintf(value, 1024, "%d", new_if_gain);
+    return 0;
+  case Setting::R820T_BAND_CENTER_SEL:    // int new_BandCenter_Sel = 0
+    snprintf(description, 1024, "%s", "R820T/2_Band_Center_Selection");
+    snprintf(value, 1024, "%d", new_BandCenter_Sel);
+    return 0;
+  case Setting::R820T_BAND_CENTER_DELTA:  // int new_BandCenter_LO_Delta = 0
+    snprintf(description, 1024, "%s", "R820T/2_Band_Center_in_Hz");
+    snprintf(value, 1024, "%d", new_BandCenter_LO_Delta);
+    return 0;
+  case Setting::R820T_USB_SIDEBAND:       // int new_USB_Sideband = 0
+    snprintf(description, 1024, "%s", "R820T/2_Tune_Upper_Sideband");
+    snprintf(value, 1024, "%d", new_USB_Sideband);
+    return 0;
+
+  default:
+    return -1;	// ERROR
+  }
 	return -1;	// ERROR
 }
 
 extern "C"
 void  LIBRTL_API __stdcall ExtIoSetSetting( int idx, const char * value )
 {
-	int tempInt;
+  static bool bCompatibleSettings = true;  // initial assumption
+  int tempInt;
 
-	switch ( idx )
-	{
-	case 0:
-		snprintf(RTL_TCP_IPAddr, 31, "%s", value);
-		return;
-	case 1:
-		tempInt = atoi(value);
-		if (tempInt >= 0 && tempInt < 65536)
-			RTL_TCP_PortNo = tempInt;
-		return;
-	case 2:
-		AutoReConnect = atoi(value) ? 1 : 0;
-		return;
-	case 3:
-		PersistentConnection = atoi(value) ? 1 : 0;
-		return;
-	case 4:
-		tempInt = atoi( value );
-		if (tempInt >= 0 && tempInt < n_srates)
-			new_srate_idx = tempInt;
-		return;
-	case 5:
-		new_TunerBW = atoi(value);
-		return;
-	case 6:
-		new_TunerAGC = atoi(value) ? 1 : 0;
-		return;
-	case 7:
-		new_RTLAGC = atoi(value) ? 1 : 0;
-		return;
-	case 8:
-		tempInt = atoi( value );
-		if (  tempInt>MIN_PPM && tempInt < MAX_PPM )
-			new_FreqCorrPPM = tempInt;
-		return;
-	case 9:
-		new_gain = atoi( value );
-		return;
-	case 10:
-		tempInt = atoi( value );
-		if (  tempInt>=0 && tempInt < (sizeof(buffer_sizes)/sizeof(buffer_sizes[0])) )
-			bufferSizeIdx = tempInt;
-		return;
-	case 11:
-		new_OffsetTuning = atoi(value) ? 1 : 0;
-		return;
-	case 12:
-		tempInt = atoi( value );
-		if (tempInt < 0)	tempInt = 0;	else if (tempInt >2)	tempInt = 2;
-		new_DirectSampling  = tempInt;
-		break;
-	case 13:
-		ASyncConnection = atoi(value) ? 1 : 0;
-		break;
-	case 14:
-		SleepMillisWaitingForData = atoi(value);
-		if (SleepMillisWaitingForData > 100)
-			SleepMillisWaitingForData = 100;
-		break;
-	case 15:
-		new_Decimation = atoi(value);
+  // in case settings are not compatible: keep internal defaults
+  if ( !bCompatibleSettings )
+    return;
 
-		if (new_Decimation < 1)
-			new_Decimation = 1;
-		else if (new_Decimation > 2)
-			new_Decimation = new_Decimation & (~1);
-		break;
-	}
+  switch ( Setting(idx) )
+  {
+  case Setting::ID:
+    bCompatibleSettings = ( 0 == strcmp(SETTINGS_IDENTIFIER, value) );
+    return;
+  case Setting::RTL_TCP_IP:
+    snprintf(RTL_TCP_IPAddr, 31, "%s", value);
+    return;
+  case Setting::RTL_TCP_PORTNO:
+    tempInt = atoi(value);
+    if (tempInt >= 0 && tempInt < 65536)
+      RTL_TCP_PortNo = tempInt;
+    return;
+  case Setting::AUTO_RECONNECT:
+    AutoReConnect = atoi(value) ? 1 : 0;
+    return;
+  case Setting::PERSISTENT_CONN:
+    PersistentConnection = atoi(value) ? 1 : 0;
+    return;
+  case Setting::SRATE_IDX:
+    tempInt = atoi( value );
+    if (tempInt >= 0 && tempInt < n_srates)
+      new_srate_idx = tempInt;
+    return;
+  case Setting::TUNER_BW:
+    new_TunerBW = atoi(value);
+    return;
+  case Setting::TUNER_RF_AGC:
+    new_TunerRF_AGC = atoi(value) ? 1 : 0;
+    return;
+  case Setting::RTL_DIG_AGC:
+    new_RTLAGC = atoi(value) ? 1 : 0;
+    return;
+  case Setting::CALIB_PPM:
+    tempInt = atoi( value );
+    if (  tempInt>MIN_PPM && tempInt < MAX_PPM )
+      new_FreqCorrPPM = tempInt;
+    return;
+  case Setting::MANUAL_RF_GAIN:
+    new_rf_gain = atoi(value);
+    return;
+  case Setting::BUFFER_SIZE_IDX:
+    tempInt = atoi( value );
+    if (  tempInt>=0 && tempInt < (sizeof(buffer_sizes)/sizeof(buffer_sizes[0])) )
+      bufferSizeIdx = tempInt;
+    return;
+  case Setting::E4K_OFFSET_TUNE:
+    new_OffsetTuning = atoi(value) ? 1 : 0;
+    return;
+  case Setting::DIRECT_SAMPLING_MODE:
+    tempInt = atoi( value );
+    if (tempInt < 0)	tempInt = 0;	else if (tempInt >2)	tempInt = 2;
+    new_DirectSampling  = tempInt;
+    break;
+  case Setting::ASYNC_SOCKET_IO:
+    ASyncSocketIO = atoi(value) ? 1 : 0;
+    break;
+  case Setting::SLEEP_MILLIS_FOR_DATA:
+    SleepMillisWaitingForData = atoi(value);
+    if (SleepMillisWaitingForData > 100)
+      SleepMillisWaitingForData = 100;
+    break;
+  case Setting::DECIMATION:
+    new_Decimation = atoi(value);
+    if (new_Decimation < 1)
+      new_Decimation = 1;
+    else if (new_Decimation > 2)
+      new_Decimation = new_Decimation & (~1);
+    break;
+
+  case Setting::TUNER_IF_AGC:             // int new_TunerIF_AGC = 1
+    new_TunerIF_AGC = atoi(value) ? 1 : 0;
+    break;
+  case Setting::MANUAL_IF_GAIN_IDX:       // int new_if_gain_idx = 1
+    new_if_gain_idx = atoi(value);
+    break;
+  case Setting::MANUAL_IF_GAIN_VAL:       // int new_if_gain = 1
+    new_if_gain = atoi(value);
+    break;
+  case Setting::R820T_BAND_CENTER_SEL:    // int new_BandCenter_Sel = 0
+    new_BandCenter_Sel = atoi(value);
+    break;
+  case Setting::R820T_BAND_CENTER_DELTA:  // int new_BandCenter_LO_Delta = 0
+    new_BandCenter_LO_Delta =  atoi(value);
+    break;
+  case Setting::R820T_USB_SIDEBAND:       // int new_USB_Sideband = 0
+    new_USB_Sideband = atoi(value) ? 1 : 0;
+    break;
+  }
 }
 
 
 extern "C"
 void LIBRTL_API __stdcall StopHW()
 {
-	SDRLOG(MSG_DEBUG, "StopHW()");
+	SDRLOG(extHw_MSG_DEBUG, "StopHW()");
 
 	ThreadStreamToSDR = false;
 	if (!PersistentConnection)
@@ -917,7 +1114,7 @@ void LIBRTL_API __stdcall StopHW()
 extern "C"
 void LIBRTL_API __stdcall CloseHW()
 {
-	SDRLOG(MSG_DEBUG, "CloseHW()");
+	SDRLOG(extHw_MSG_DEBUG, "CloseHW()");
 
 	ThreadStreamToSDR = false;
 	Stop_Thread();
@@ -957,9 +1154,9 @@ void LIBRTL_API  __stdcall SwitchGUI()
 
 
 extern "C"
-void LIBRTL_API __stdcall SetCallback(void (* myCallBack)(int, int, float, void *))
+void LIBRTL_API __stdcall SetCallback( pfnExtIOCallback funcptr )
 {
-	WinradCallBack = myCallBack;
+    gpfnExtIOCallbackPtr = funcptr;
 }
 
 extern "C"
@@ -969,7 +1166,7 @@ void LIBRTL_API  __stdcall VersionInfo(const char * progname, int ver_major, int
 		&& (ver_major >= 3 || (ver_major == 2 && ver_minor > 70)))
 	{
 		SDRsupportsSamplePCMU8 = true;
-		SDRLOG(MSG_DEBUG, "detected HDSDR > 2.70. => enabling PCMU8");
+		SDRLOG(extHw_MSG_DEBUG, "detected HDSDR > 2.70. => enabling PCMU8");
 	}
 }
 
@@ -979,7 +1176,7 @@ void LIBRTL_API  __stdcall ExtIoSDRInfo( int extSDRInfo, int additionalValue, vo
 	if (extSDRInfo == extSDR_supports_PCMU8)
 	{
 		SDRsupportsSamplePCMU8 = true;
-		SDRLOG(MSG_DEBUG, "detected SDR with PCMU8 capability => enabling PCMU8");
+		SDRLOG(extHw_MSG_DEBUG, "detected SDR with PCMU8 capability => enabling PCMU8");
 	}
 	else if (extSDRInfo == extSDR_supports_Logging)
 		SDRsupportsLogging = true;
@@ -1038,285 +1235,373 @@ int Stop_Thread()
 
 void ThreadProc(void *p)
 {
-	while (!terminateThread)
-	{
-		// E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
-		rtl_tcp_dongle_info.ui[1] = tunerNo = 0;
-		rtl_tcp_dongle_info.ui[2] = numTunerGains = 0;
+    while (!terminateThread)
+    {
+        // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+        rtl_tcp_dongle_info.ui[1] = tunerNo = 0;
+        rtl_tcp_dongle_info.ui[2] = numTunerGains = 0;
 
-		GotTunerInfo = false;
-		if (h_dialog)
-			PostMessage(h_dialog, WM_PRINT, (WPARAM)0, (LPARAM)PRF_CLIENT);
+        GotTunerInfo = false;
+        if (h_dialog)
+            PostMessage(h_dialog, WM_PRINT, (WPARAM)0, (LPARAM)PRF_CLIENT);
 
-		CActiveSocket conn;
-		const bool initOK = conn.Initialize();
-		const bool connOK = conn.Open(RTL_TCP_IPAddr, (uint16_t)RTL_TCP_PortNo);
+        CActiveSocket conn;
+        const bool initOK = conn.Initialize();
+        const bool connOK = conn.Open(RTL_TCP_IPAddr, (uint16_t)RTL_TCP_PortNo);
 
-		if (connOK)
-		{
-			SDRLOG(MSG_DEBUG, "TCP connect was successful");
-			if (GUIDebugConnection)
-				::MessageBoxA(0, "TCP connect was successful", "Status", 0);
-		}
-		else
-		{
-			SDRLOG(MSG_DEBUG, "TCP connect failed! Retry ..");
-			// ::MessageBoxA(0, "TCP connect failed!\nRetry ..", "Status", 0);
-			goto label_reConnect;
-		}
+        if (connOK)
+        {
+            SDRLOG(extHw_MSG_DEBUG, "TCP connect was successful");
+            if (GUIDebugConnection)
+                ::MessageBoxA(0, "TCP connect was successful", "Status", 0);
+        }
+        else
+        {
+            SDRLOG(extHw_MSG_DEBUG, "TCP connect failed! Retry ..");
+            // ::MessageBoxA(0, "TCP connect failed!\nRetry ..", "Status", 0);
+            goto label_reConnect;
+        }
 
-		if (ASyncConnection)
-			conn.SetNonblocking();
-		else
-			conn.SetBlocking();
+        if (ASyncSocketIO)
+            conn.SetNonblocking();
+        else
+            conn.SetBlocking();
 
-		// on connection server will transmit dongle_info once
-		int readHdr = 0;
-		bool hdrOK = true;
-		while (!terminateThread)
-		{
-			int32 toRead = 12 - readHdr;
-			int32 nRead = conn.Receive(toRead);
-			if (nRead > 0)
-			{
-				uint8_t *nBuf = conn.GetData();
-				memcpy((void*)(&rtl_tcp_dongle_info.ac[readHdr]), nBuf, nRead);
-				if (readHdr < 4 && readHdr + nRead >= 4)
-				{
-					if (   rtl_tcp_dongle_info.ac[0] != 'R'
-						&& rtl_tcp_dongle_info.ac[1] != 'T'
-						&& rtl_tcp_dongle_info.ac[2] != 'L'
-						&& rtl_tcp_dongle_info.ac[3] != '0' )
-					{
-						// It has to start with "RTL0"!
-						if (SDRsupportsLogging)
-							SDRLOG(MSG_ERRDLG, "Error: Stream is not from rtl_tcp. Change Source!");
-						else
-							::MessageBoxA(0, "Error: Stream is not from rtl_tcp", "Error", 0);
-						hdrOK = false;
-						break;
-					}
-				}
-				readHdr += nRead;
-				if (readHdr >= 12)
-					break;
-			}
-			else
-			{
-				CSimpleSocket::CSocketError err = conn.GetSocketError();
-				if (CSimpleSocket::SocketSuccess != err && CSimpleSocket::SocketEwouldblock != err)
-				{
-					char acMsg[256];
-					snprintf(acMsg, 255, "Socket Error %d after %d bytes in header!", (int)err, nRead);
-					if (SDRsupportsLogging)
-						SDRLOG(MSG_ERRDLG, acMsg);
-					else
-						::MessageBoxA(0, acMsg, "Socket Error", 0);
-					hdrOK = false;
-					break;
-				}
-				else if (CSimpleSocket::SocketEwouldblock == err && SleepMillisWaitingForData >= 0)
-					::Sleep(SleepMillisWaitingForData);
-			}
-		}
-		if (!hdrOK)
-			goto label_reConnect;
-
-		rtl_tcp_dongle_info.ui[1] = tunerNo = ntohl(rtl_tcp_dongle_info.ui[1]);
-		rtl_tcp_dongle_info.ui[2] = numTunerGains = ntohl(rtl_tcp_dongle_info.ui[2]);
-
-		GotTunerInfo = true;
-		if (h_dialog)
-			PostMessage(h_dialog, WM_PRINT, (WPARAM)0, (LPARAM)PRF_CLIENT);
-
-		if (GUIDebugConnection)
-			::MessageBoxA(0, "received 12 bytes header", "Status", 0);
-
-		// update bandwidths
-		bandwidths = tuner_bws[tunerNo].bw;
-		n_bandwidths = tuner_bws[tunerNo].num;
-		if (n_bandwidths)
-		{
-			int bwIdx = nearestBwIdx(new_TunerBW);
-			new_TunerBW = bandwidths[bwIdx];
-			last_TunerBW = new_TunerBW + 1;
-		}
-
-		// update gains
-		gains = tuner_gains[tunerNo].gain;
-		n_gains = tuner_gains[tunerNo].num;
-		if (n_gains)
-		{
-			int gainIdx = nearestGainIdx(new_gain);
-			new_gain = gains[gainIdx];
-			last_gain = new_gain + 10;
-		}
-
-		char acMsg[256];
-		int prevBufferIdx = NUM_BUFFERS_BEFORE_CALLBACK - 1;
-		int receiveBufferIdx = 0;
-		int receivedLen = 0;
-		int receiveOffset = 2 * MAX_DECIMATIONS;
-		unsigned receivedBlocks = 0;
-		int initialSrate = 1;
-		int receivedSamples = 0;
-		bool printCallbackLen = true;
-		commandEverything = true;
-		memset(&rcvBuf[prevBufferIdx][0], 0, MAX_BUFFER_LEN + 2 * MAX_DECIMATIONS);
-
-		while (!terminateThread)
-		{
-			if (ThreadStreamToSDR && (somewhat_changed || commandEverything))
-			{
-				if (last_DirectSampling != new_DirectSampling || commandEverything)
-				{
-					if (!transmitTcpCmd(conn, 0x09, new_DirectSampling))
-						break;
-					last_DirectSampling = new_DirectSampling;
-					somewhat_changed &= ~(32);
-				}
-				if (last_OffsetTuning != new_OffsetTuning || commandEverything)
-				{
-					if (!transmitTcpCmd(conn, 0x0A, new_OffsetTuning))
-						break;
-					last_OffsetTuning = new_OffsetTuning;
-					somewhat_changed &= ~(64);
-				}
-				if (last_FreqCorrPPM != new_FreqCorrPPM || commandEverything)
-				{
-					if (!transmitTcpCmd(conn, 0x05, new_FreqCorrPPM))
-						break;
-					last_FreqCorrPPM = new_FreqCorrPPM;
-					somewhat_changed &= ~(128);
-				}
-				if (last_freq != new_freq || commandEverything)
-				{
-					if (!transmitTcpCmd(conn, 0x01, new_freq))
-						break;
-					last_freq = new_freq;
-					somewhat_changed &= ~(1);
-				}
-				if (last_srate_idx != new_srate_idx || commandEverything)
-				{
-					// re-parametrize TunerAGC
-					{
-						transmitTcpCmd(conn, 0x03, 1 - new_TunerAGC);
-						last_TunerAGC = new_TunerAGC;
-						somewhat_changed &= ~(8);
-					}
-
-					// re-parametrize Gain
-					if (new_TunerAGC == 0)
-					{
-						transmitTcpCmd(conn, 0x04, new_gain);
-						last_gain = new_gain;
-						somewhat_changed &= ~(4);
-					}
-
-					// re-parametrize Tuner Bandwidth
-					{
-            if (n_bandwidths)
+        // on connection server will transmit dongle_info once
+        int readHdr = 0;
+        bool hdrOK = true;
+        while (!terminateThread)
+        {
+            int32 toRead = 12 - readHdr;
+            int32 nRead = conn.Receive(toRead);
+            if (nRead > 0)
             {
-              //transmitTcpCmd(conn, 0x0E, new_TunerBW * 1000);   // was 0x0E
-              transmitTcpCmd(conn, 0x40, new_TunerBW * 1000);   // was 0x0E
+                uint8_t *nBuf = conn.GetData();
+                memcpy((void*)(&rtl_tcp_dongle_info.ac[readHdr]), nBuf, nRead);
+                if (readHdr < 4 && readHdr + nRead >= 4)
+                {
+                    if (   rtl_tcp_dongle_info.ac[0] != 'R'
+                        && rtl_tcp_dongle_info.ac[1] != 'T'
+                        && rtl_tcp_dongle_info.ac[2] != 'L'
+                        && rtl_tcp_dongle_info.ac[3] != '0' )
+                    {
+                        // It has to start with "RTL0"!
+                        if (SDRsupportsLogging)
+                            SDRLOG(extHw_MSG_ERRDLG, "Error: Stream is not from rtl_tcp. Change Source!");
+                        else
+                            ::MessageBoxA(0, "Error: Stream is not from rtl_tcp", "Error", 0);
+                        hdrOK = false;
+                        break;
+                    }
+                }
+                readHdr += nRead;
+                if (readHdr >= 12)
+                    break;
             }
-						last_TunerBW = new_TunerBW;
-						somewhat_changed &= ~(256);
-					}
+            else
+            {
+                CSimpleSocket::CSocketError err = conn.GetSocketError();
+                if (CSimpleSocket::SocketSuccess != err && CSimpleSocket::SocketEwouldblock != err)
+                {
+                    char acMsg[256];
+                    snprintf(acMsg, 255, "Socket Error %d after %d bytes in header!", (int)err, nRead);
+                    if (SDRsupportsLogging)
+                        SDRLOG(extHw_MSG_ERRDLG, acMsg);
+                    else
+                        ::MessageBoxA(0, acMsg, "Socket Error", 0);
+                    hdrOK = false;
+                    break;
+                }
+                else if (CSimpleSocket::SocketEwouldblock == err && SleepMillisWaitingForData >= 0)
+                    ::Sleep(SleepMillisWaitingForData);
+            }
+        }
+        if (!hdrOK)
+            goto label_reConnect;
 
-					// re-parametrize samplerate
-					{
-						if (!transmitTcpCmd(conn, 0x02, samplerates[new_srate_idx].valueInt))
-							break;
-						last_srate_idx = new_srate_idx;
-						somewhat_changed &= ~(2);
-					}
-				}
-				if (last_TunerBW != new_TunerBW )
-				{
-					//if (!transmitTcpCmd(conn, 0x0E, new_TunerBW*1000))
-					//	break;
-          if (!transmitTcpCmd(conn, 0x40, new_TunerBW * 1000))
-            break;
-          last_TunerBW = new_TunerBW;
-					somewhat_changed &= ~(256);
-				}
-				if (last_TunerAGC != new_TunerAGC)
-				{
-					if (!transmitTcpCmd(conn, 0x03, 1-new_TunerAGC))
-						break;
-					last_TunerAGC = new_TunerAGC;
-					if (new_TunerAGC == 0)
-						last_gain = new_gain + 1;
-					somewhat_changed &= ~(8);
-				}
-				if (last_RTLAGC != new_RTLAGC || commandEverything)
-				{
-					if (!transmitTcpCmd(conn, 0x08, new_RTLAGC))
-						break;
-					last_RTLAGC = new_RTLAGC;
-					somewhat_changed &= ~(16);
-				}
-				if (last_gain != new_gain)
-				{
-					if (new_TunerAGC == 0)
-					{
-						// transmit manual gain only when TunerAGC is off
-						if (!transmitTcpCmd(conn, 0x04, new_gain))
-							break;
-					}
-					last_gain = new_gain;
-					somewhat_changed &= ~(4);
-				}
-				if (last_Decimation != new_Decimation)
-				{
-					last_Decimation = new_Decimation;
-					somewhat_changed &= ~(512);
-				}
+        rtl_tcp_dongle_info.ui[1] = tunerNo = ntohl(rtl_tcp_dongle_info.ui[1]);
+        rtl_tcp_dongle_info.ui[2] = numTunerGains = ntohl(rtl_tcp_dongle_info.ui[2]);
 
-				commandEverything = false;
-			}
+        GotTunerInfo = true;
+        if (h_dialog)
+            PostMessage(h_dialog, WM_PRINT, (WPARAM)0, (LPARAM)PRF_CLIENT);
 
-			int32 toRead = buffer_len - receivedLen;
-			int32 nRead = conn.Receive(toRead, &rcvBuf[receiveBufferIdx][receiveOffset]);
-			if (nRead > 0)
-			{
-				receivedLen += nRead;
-				receiveOffset += nRead;
-				if (receivedLen >= buffer_len)
-				{
-					// copy last MAX_DECIMATIONS I/Q samples from end of prevBufferIdx to begin of current received buffer
-					for (int k = 1; k <= 2 * MAX_DECIMATIONS; ++k)
-						rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS - k] = rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len - k];
-					prevBufferIdx = receiveBufferIdx;
+        if (GUIDebugConnection)
+            ::MessageBoxA(0, "received 12 bytes header", "Status", 0);
 
-					if (!ThreadStreamToSDR)
-					{
-						commandEverything = true;
-						receiveBufferIdx = 0;			// restart reception with 1st decimation buffer
-					}
-					else
-					{
-						++receiveBufferIdx;
-						if (receiveBufferIdx >= new_Decimation)
-						{
-							// start over with 1st decimation block - for next reception
-							receiveBufferIdx = 0;
+        // update bandwidths
+        bandwidths = tuner_bws[tunerNo].bw;
+        n_bandwidths = tuner_bws[tunerNo].num;
+        if (n_bandwidths)
+        {
+            int bwIdx = nearestBwIdx(new_TunerBW);
+            new_TunerBW = bandwidths[bwIdx];
+            last_TunerBW = new_TunerBW + 1;
+        }
 
-							const int n_samples_per_block = buffer_len / 2;
-							const int n_output_per_block = n_samples_per_block / new_Decimation;
+        // update hf gains
+        rf_gains = tuner_rf_gains[tunerNo].gain;
+        n_rf_gains = tuner_rf_gains[tunerNo].num;
+        if (n_rf_gains)
+        {
+            int gainIdx = nearestGainIdx(new_rf_gain, rf_gains, n_rf_gains);
+            new_rf_gain = rf_gains[gainIdx];
+            last_rf_gain = new_rf_gain + 10;
+        }
 
-							short * short_ptr = &short_buf[0];
-							for (int callbackBufferNo = 0; callbackBufferNo < new_Decimation; ++callbackBufferNo)
-							{
-								if (new_Decimation > 1 && extHWtype == exthwUSBdata16 )
-								{
-									const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - 2*new_Decimation];
+        // update if gains
+        if_gains = tuner_if_gains[tunerNo].gain;
+        n_if_gains = tuner_if_gains[tunerNo].num;
+        if (n_if_gains)
+        {
+            new_if_gain_idx = nearestGainIdx(new_if_gain, if_gains, n_if_gains);
+            new_if_gain = if_gains[new_if_gain_idx];
+            last_if_gain = new_if_gain + 10;
+            last_if_gain_idx = new_if_gain_idx + 1;
+        }
+
+        char acMsg[256];
+        int prevBufferIdx = NUM_BUFFERS_BEFORE_CALLBACK - 1;
+        int receiveBufferIdx = 0;
+        int receivedLen = 0;
+        int receiveOffset = 2 * MAX_DECIMATIONS;
+        unsigned receivedBlocks = 0;
+        int initialSrate = 1;
+        int receivedSamples = 0;
+        bool printCallbackLen = true;
+        commandEverything = true;
+        memset(&rcvBuf[prevBufferIdx][0], 0, MAX_BUFFER_LEN + 2 * MAX_DECIMATIONS);
+
+        while (!terminateThread)
+        {
+            if (ThreadStreamToSDR && (somewhat_changed || commandEverything))
+            {
+                if (last_DirectSampling != new_DirectSampling || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x09, new_DirectSampling))
+                        break;
+                    last_DirectSampling = new_DirectSampling;
+                    somewhat_changed &= ~(32);
+                }
+                if (last_OffsetTuning != new_OffsetTuning || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x0A, new_OffsetTuning))
+                        break;
+                    last_OffsetTuning = new_OffsetTuning;
+                    somewhat_changed &= ~(64);
+                }
+                if (last_USB_Sideband != new_USB_Sideband || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x47, new_USB_Sideband))
+                        break;
+                    last_USB_Sideband = new_USB_Sideband;
+                    somewhat_changed &= ~(1024);
+                }
+                if (last_FreqCorrPPM != new_FreqCorrPPM || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x05, new_FreqCorrPPM))
+                        break;
+                    last_FreqCorrPPM = new_FreqCorrPPM;
+                    somewhat_changed &= ~(128);
+                }
+                if (last_BandCenter_Sel != new_BandCenter_Sel || commandEverything)
+                {
+                    int fs = samplerates[new_srate_idx].valueInt;
+                    int band_center = 0;
+                    if (new_BandCenter_Sel == 1)
+                        band_center = fs / 4;
+                    else if (new_BandCenter_Sel == 2)
+                        band_center = -fs / 4;
+
+                    if (!transmitTcpCmd(conn, 0x45, band_center))
+                        break;
+                    last_BandCenter_Sel = new_BandCenter_Sel;
+                    last_BandCenter_LO_Delta = new_BandCenter_LO_Delta;
+                    somewhat_changed &= ~(2048);
+                    somewhat_changed |= 1;
+                }
+                if (last_LO_freq != new_LO_freq || (somewhat_changed & 1) || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x01, (uint32_t)(new_LO_freq /* - new_BandCenter_LO_Delta */)))
+                        break;
+                    last_LO_freq = new_LO_freq;
+                    somewhat_changed &= ~(1);
+                }
+                if (last_srate_idx != new_srate_idx || commandEverything)
+                {
+                    // re-parametrize Tuner RF AGC
+                    {
+                        transmitTcpCmd(conn, 0x03, 1 - new_TunerRF_AGC);
+                        last_TunerRF_AGC = new_TunerRF_AGC;
+                        somewhat_changed &= ~(8);
+                    }
+
+                    // re-parametrize Gain
+                    if (new_TunerRF_AGC == 0)
+                    {
+                        transmitTcpCmd(conn, 0x04, new_rf_gain);
+                        last_rf_gain = new_rf_gain;
+                        somewhat_changed &= ~(4);
+                    }
+
+                    // re-parametrize Tuner IF AGC and/or IF gain
+                    if ( new_TunerIF_AGC )
+                    {
+                        transmitTcpCmd(conn, 0x46, 0);
+                        last_TunerIF_AGC = new_TunerIF_AGC;
+                        last_if_gain_idx = new_if_gain_idx;
+                        somewhat_changed &= ~(4096);
+                    }
+                    else
+                    {
+                        transmitTcpCmd(conn, 0x46, 10000 + new_if_gain_idx );
+                        last_TunerIF_AGC = new_TunerIF_AGC;
+                        last_if_gain_idx = new_if_gain_idx;
+                        somewhat_changed &= ~(4096);
+                    }
+
+                    // re-parametrize Tuner Bandwidth
+                    {
+                        if (n_bandwidths)
+                        {
+                            //transmitTcpCmd(conn, 0x0E, new_TunerBW * 1000);   // was 0x0E
+                            transmitTcpCmd(conn, 0x40, new_TunerBW * 1000);   // was 0x0E
+                        }
+                        last_TunerBW = new_TunerBW;
+                        somewhat_changed &= ~(256);
+                    }
+
+                    // re-parametrize samplerate
+                    {
+                        if (!transmitTcpCmd(conn, 0x02, samplerates[new_srate_idx].valueInt))
+                            break;
+                        last_srate_idx = new_srate_idx;
+                        somewhat_changed &= ~(2);
+                    }
+
+                    if (last_BandCenter_Sel != new_BandCenter_Sel || commandEverything)
+                    {
+                        int fs = samplerates[new_srate_idx].valueInt;
+                        int band_center = 0;
+                        if (new_BandCenter_Sel == 1)
+                            band_center = fs / 4;
+                        else if (new_BandCenter_Sel == 2)
+                            band_center = -fs / 4;
+
+                        if (!transmitTcpCmd(conn, 0x45, band_center))
+                            break;
+                        last_BandCenter_Sel = new_BandCenter_Sel;
+                        somewhat_changed &= ~(2048);
+                    }
+                }
+
+                if (last_TunerBW != new_TunerBW )
+                {
+                    //if (!transmitTcpCmd(conn, 0x0E, new_TunerBW*1000))
+                    //	break;
+                    if (!transmitTcpCmd(conn, 0x40, new_TunerBW * 1000))
+                        break;
+                    last_TunerBW = new_TunerBW;
+                    somewhat_changed &= ~(256);
+                }
+
+                if (last_TunerRF_AGC != new_TunerRF_AGC)
+                {
+                    if (!transmitTcpCmd(conn, 0x03, 1-new_TunerRF_AGC))
+                        break;
+                    last_TunerRF_AGC = new_TunerRF_AGC;
+                    if (new_TunerRF_AGC == 0)
+                        last_rf_gain = new_rf_gain + 1;
+                    somewhat_changed &= ~(8);
+                }
+
+                if (last_RTLAGC != new_RTLAGC || commandEverything)
+                {
+                    if (!transmitTcpCmd(conn, 0x08, new_RTLAGC))
+                        break;
+                    last_RTLAGC = new_RTLAGC;
+                    somewhat_changed &= ~(16);
+                }
+
+                if (last_rf_gain != new_rf_gain)
+                {
+                    if (new_TunerRF_AGC == 0)
+                    {
+                        // transmit manual gain only when TunerAGC is off
+                        if (!transmitTcpCmd(conn, 0x04, new_rf_gain))
+                            break;
+                    }
+                    last_rf_gain = new_rf_gain;
+                    somewhat_changed &= ~(4);
+                }
+
+                if (last_TunerIF_AGC != new_TunerIF_AGC || last_if_gain_idx != new_if_gain_idx )
+                {
+                    if (new_TunerIF_AGC)
+                    {
+                        if (!transmitTcpCmd(conn, 0x46, 0))
+                            break;
+                        last_TunerIF_AGC = new_TunerIF_AGC;
+                        last_if_gain_idx = new_if_gain_idx;
+                        somewhat_changed &= ~(4096);
+                    }
+                    else
+                    {
+                        if (!transmitTcpCmd(conn, 0x46, 10000 + new_if_gain_idx))
+                            break;
+                        last_TunerIF_AGC = new_TunerIF_AGC;
+                        last_if_gain_idx = new_if_gain_idx;
+                        somewhat_changed &= ~(4096);
+                    }
+                }
+
+                if (last_Decimation != new_Decimation)
+                {
+                    last_Decimation = new_Decimation;
+                    somewhat_changed &= ~(512);
+                }
+
+                commandEverything = false;
+            }
+
+            int32 toRead = buffer_len - receivedLen;
+            int32 nRead = conn.Receive(toRead, &rcvBuf[receiveBufferIdx][receiveOffset]);
+            if (nRead > 0)
+            {
+                receivedLen += nRead;
+                receiveOffset += nRead;
+                if (receivedLen >= buffer_len)
+                {
+                    // copy last MAX_DECIMATIONS I/Q samples from end of prevBufferIdx to begin of current received buffer
+                    for (int k = 1; k <= 2 * MAX_DECIMATIONS; ++k)
+                    	rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS - k] = rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len - k];
+                    prevBufferIdx = receiveBufferIdx;
+                    
+                    if (!ThreadStreamToSDR)
+                    {
+                    	commandEverything = true;
+                    	receiveBufferIdx = 0;			// restart reception with 1st decimation buffer
+                    }
+                    else
+                    {
+                        ++receiveBufferIdx;
+                        if (receiveBufferIdx >= new_Decimation)
+                        {
+                            // start over with 1st decimation block - for next reception
+                            receiveBufferIdx = 0;
+                            const int n_samples_per_block = buffer_len / 2;
+                            const int n_output_per_block = n_samples_per_block / new_Decimation;
+                            short * short_ptr = &short_buf[0];
+                            for (int callbackBufferNo = 0; callbackBufferNo < new_Decimation; ++callbackBufferNo)
+                            {
+                                if (new_Decimation > 1 && extHWtype == exthwUSBdata16 )
+                                {
+                                    const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS - 2*new_Decimation];
 #if ( !FULL_DECIMATION )
-									// block always starts from scratch without decimation
-									short_ptr = &short_buf[0];
+                                    // block always starts from scratch without decimation
+                                    short_ptr = &short_buf[0];
 #endif
-									int i;
+                                    int i;
 
 #if ( FULL_DECIMATION )
 	#define CHAR_PTR_INC(D)		(2 * D);
@@ -1325,177 +1610,189 @@ void ThreadProc(void *p)
 	#define CHAR_PTR_INC(D)		(2);
 	#define ITER_COUNT			n_samples_per_block
 #endif
-									switch (new_Decimation)
-									{
-									case 1:
-										for (i = 0; i < ITER_COUNT; i++)
-										{
-											*short_ptr++ = ((short)(char_ptr[0])) - 128;
-											*short_ptr++ = ((short)(char_ptr[1])) - 128;
-											char_ptr += 2;
-										}
-										break;
-									case 2:
-										for (i = 0; i < ITER_COUNT; i++)
-										{
-											*short_ptr++ = ((short)(char_ptr[0])) + ((short)(char_ptr[2])) - 2 * 128;
-											*short_ptr++ = ((short)(char_ptr[1])) + ((short)(char_ptr[3])) - 2 * 128;
-											char_ptr += CHAR_PTR_INC(2);
-										}
-										break;
-									case 4:
-										for (i = 0; i < ITER_COUNT; i++)
-										{
-											*short_ptr++ = ((short)(char_ptr[0]))
-												+ ((short)(char_ptr[2]))
-												+ ((short)(char_ptr[4]))
-												+ ((short)(char_ptr[6])) - 4 * 128;
-											*short_ptr++ = ((short)(char_ptr[1]))
-												+ ((short)(char_ptr[3]))
-												+ ((short)(char_ptr[5]))
-												+ ((short)(char_ptr[7])) - 4 * 128;
-											char_ptr += CHAR_PTR_INC(4);
-										}
-										break;
-									case 6:
-										for (i = 0; i < ITER_COUNT; i++)
-										{
-											*short_ptr++ = ((short)(char_ptr[0]))
-												+ ((short)(char_ptr[2]))
-												+ ((short)(char_ptr[4]))
-												+ ((short)(char_ptr[6]))
-												+ ((short)(char_ptr[8]))
-												+ ((short)(char_ptr[10])) - 6 * 128;
-											*short_ptr++ = ((short)(char_ptr[1]))
-												+ ((short)(char_ptr[3]))
-												+ ((short)(char_ptr[5]))
-												+ ((short)(char_ptr[7]))
-												+ ((short)(char_ptr[9]))
-												+ ((short)(char_ptr[11])) - 6 * 128;
-											char_ptr += CHAR_PTR_INC(6);
-										}
-										break;
-									case 8:
-										for (i = 0; i < ITER_COUNT; i++)
-										{
-											*short_ptr++ = ((short)(char_ptr[0]))
-												+ ((short)(char_ptr[2]))
-												+ ((short)(char_ptr[4]))
-												+ ((short)(char_ptr[6]))
-												+ ((short)(char_ptr[8]))
-												+ ((short)(char_ptr[10]))
-												+ ((short)(char_ptr[12]))
-												+ ((short)(char_ptr[14])) - 8 * 128;
-											*short_ptr++ = ((short)(char_ptr[1]))
-												+ ((short)(char_ptr[3]))
-												+ ((short)(char_ptr[5]))
-												+ ((short)(char_ptr[7]))
-												+ ((short)(char_ptr[9]))
-												+ ((short)(char_ptr[11]))
-												+ ((short)(char_ptr[13]))
-												+ ((short)(char_ptr[15])) - 8 * 128;
-											char_ptr += CHAR_PTR_INC(8);
-										}
-										break;
-									}
+                                    switch (new_Decimation)
+                                    {
+                                    case 1:
+                                        for (i = 0; i < ITER_COUNT; i++)
+                                        {
+                                            *short_ptr++ = ((short)(char_ptr[0])) - 128;
+                                            *short_ptr++ = ((short)(char_ptr[1])) - 128;
+                                            char_ptr += 2;
+                                        }
+                                        break;
+                                    case 2:
+                                        for (i = 0; i < ITER_COUNT; i++)
+                                        {
+                                            *short_ptr++ = ((short)(char_ptr[0])) + ((short)(char_ptr[2])) - 2 * 128;
+                                            *short_ptr++ = ((short)(char_ptr[1])) + ((short)(char_ptr[3])) - 2 * 128;
+                                            char_ptr += CHAR_PTR_INC(2);
+                                        }
+                                        break;
+                                    case 4:
+                                        for (i = 0; i < ITER_COUNT; i++)
+                                        {
+                                            *short_ptr++ = ((short)(char_ptr[0]))
+                                                + ((short)(char_ptr[2]))
+                                                + ((short)(char_ptr[4]))
+                                                + ((short)(char_ptr[6])) - 4 * 128;
+                                            *short_ptr++ = ((short)(char_ptr[1]))
+                                                + ((short)(char_ptr[3]))
+                                                + ((short)(char_ptr[5]))
+                                                + ((short)(char_ptr[7])) - 4 * 128;
+                                            char_ptr += CHAR_PTR_INC(4);
+                                        }
+                                        break;
+                                    case 6:
+                                        for (i = 0; i < ITER_COUNT; i++)
+                                        {
+                                            *short_ptr++ = ((short)(char_ptr[0]))
+                                                + ((short)(char_ptr[2]))
+                                                + ((short)(char_ptr[4]))
+                                                + ((short)(char_ptr[6]))
+                                                + ((short)(char_ptr[8]))
+                                                + ((short)(char_ptr[10])) - 6 * 128;
+                                            *short_ptr++ = ((short)(char_ptr[1]))
+                                                + ((short)(char_ptr[3]))
+                                                + ((short)(char_ptr[5]))
+                                                + ((short)(char_ptr[7]))
+                                                + ((short)(char_ptr[9]))
+                                                + ((short)(char_ptr[11])) - 6 * 128;
+                                            char_ptr += CHAR_PTR_INC(6);
+                                        }
+                                        break;
+                                    case 8:
+                                        for (i = 0; i < ITER_COUNT; i++)
+                                        {
+                                            *short_ptr++ = ((short)(char_ptr[0]))
+                                                + ((short)(char_ptr[2]))
+                                                + ((short)(char_ptr[4]))
+                                                + ((short)(char_ptr[6]))
+                                                + ((short)(char_ptr[8]))
+                                                + ((short)(char_ptr[10]))
+                                                + ((short)(char_ptr[12]))
+                                                + ((short)(char_ptr[14])) - 8 * 128;
+                                            *short_ptr++ = ((short)(char_ptr[1]))
+                                                + ((short)(char_ptr[3]))
+                                                + ((short)(char_ptr[5]))
+                                                + ((short)(char_ptr[7]))
+                                                + ((short)(char_ptr[9]))
+                                                + ((short)(char_ptr[11]))
+                                                + ((short)(char_ptr[13]))
+                                                + ((short)(char_ptr[15])) - 8 * 128;
+                                            char_ptr += CHAR_PTR_INC(8);
+                                        }
+                                        break;
+                                    }
 #if ( !FULL_DECIMATION )
-									if (printCallbackLen)
-									{
-										printCallbackLen = false;
-										snprintf(acMsg, 255, "Callback() with %d non-decimated I/Q pairs", ITER_COUNT);
-										SDRLOG(MSG_DEBUG, acMsg);
-									}
-									WinradCallBack(ITER_COUNT, 0, 0, short_buf);
+                                    if (printCallbackLen)
+                                    {
+                                        printCallbackLen = false;
+                                        snprintf(acMsg, 255, "Callback() with %d non-decimated I/Q pairs", ITER_COUNT);
+                                        SDRLOG(extHw_MSG_DEBUG, acMsg);
+                                    }
+                                    gpfnExtIOCallbackPtr(ITER_COUNT, 0, 0, short_buf);
 #endif
-								}
-								else
-								{
-									if (extHWtype == exthwUSBdata16)
-									{
-										short *short_ptr = &short_buf[0];
-										const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
-										for (int i = 0; i < buffer_len; i++)
-											*short_ptr++ = ((short)(*char_ptr++)) - 128;
-										if (printCallbackLen)
-										{
-											printCallbackLen = false;
-											snprintf(acMsg, 255, "Callback() with %d raw 16 bit I/Q pairs", n_samples_per_block);
-											SDRLOG(MSG_DEBUG, acMsg);
-										}
-										WinradCallBack(n_samples_per_block, 0, 0, short_buf);
-									}
-									else
-									{
-										unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
-										if (printCallbackLen)
-										{
-											printCallbackLen = false;
-											snprintf(acMsg, 255, "Callback() with %d raw 8 Bit I/Q pairs", n_samples_per_block);
-											SDRLOG(MSG_DEBUG, acMsg);
-										}
-										WinradCallBack(n_samples_per_block, 0, 0, char_ptr);
-									}
-								}
-							} // end for
+                                }
+                                else
+                                {
+                                    if (extHWtype == exthwUSBdata16)
+                                    {
+                                        short *short_ptr = &short_buf[0];
+                                        const unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
+                                        for (int i = 0; i < buffer_len; i++)
+                                            *short_ptr++ = ((short)(*char_ptr++)) - 128;
+                                        if (printCallbackLen)
+                                        {
+                                            printCallbackLen = false;
+                                            snprintf(acMsg, 255, "Callback() with %d raw 16 bit I/Q pairs", n_samples_per_block);
+                                            SDRLOG(extHw_MSG_DEBUG, acMsg);
+                                        }
+                                        gpfnExtIOCallbackPtr(n_samples_per_block, 0, 0, short_buf);
+                                    }
+                                    else
+                                    {
+                                        unsigned char* char_ptr = &rcvBuf[callbackBufferNo][2*MAX_DECIMATIONS];
+                                        if (printCallbackLen)
+                                        {
+                                            printCallbackLen = false;
+                                            snprintf(acMsg, 255, "Callback() with %d raw 8 Bit I/Q pairs", n_samples_per_block);
+                                            SDRLOG(extHw_MSG_DEBUG, acMsg);
+                                        }
+                                        gpfnExtIOCallbackPtr(n_samples_per_block, 0, 0, char_ptr);
+                                    }
+                                }
+                            } // end for
 
 #if ( FULL_DECIMATION )
-							if (new_Decimation > 1 && extHWtype == exthwUSBdata16)
-							{
-								if (printCallbackLen)
-								{
-									printCallbackLen = false;
-									snprintf(acMsg, 255, "Callback() with %d decimated I/Q pairs", n_samples_per_block);
-									SDRLOG(MSG_DEBUG, acMsg);
-								}
-								WinradCallBack(n_samples_per_block, 0, 0, short_buf);
-							}
+                            if (new_Decimation > 1 && extHWtype == exthwUSBdata16)
+                            {
+                                if (printCallbackLen)
+                                {
+                                    printCallbackLen = false;
+                                    snprintf(acMsg, 255, "Callback() with %d decimated I/Q pairs", n_samples_per_block);
+                                    SDRLOG(extHw_MSG_DEBUG, acMsg);
+                                }
+                                gpfnExtIOCallbackPtr(n_samples_per_block, 0, 0, short_buf);
+                            }
 #endif
-						}
-					}
 
-					++receivedBlocks;	// network statistics
+                            if (retune_freq)
+                            {
+                              retune_counter -= n_samples_per_block;
+                              if (retune_counter <= 0)
+                              {
+                                new_tuneFreq = retune_value;
+                                retune_freq = false;
+                                EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_TUNE);
+                              }
+                            }
 
-					// prepare next receive offset / length
-					receivedLen -= buffer_len;
-					receiveOffset -= buffer_len;
-					if (receivedLen > 0)
-					{
-						snprintf(acMsg, 255, "receivedLen - buffer_len = %d != 0", receivedLen);
-						SDRLOG(MSG_DEBUG, acMsg);
-						memcpy(&rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS], &rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len], receivedLen);
-					}
-				}
-			}
-			else
-			{
-				CSimpleSocket::CSocketError err = conn.GetSocketError();
-				if (CSimpleSocket::SocketSuccess != err && CSimpleSocket::SocketEwouldblock != err)
-				{
-					char acMsg[256];
-					if (GUIDebugConnection)
-						snprintf(acMsg, 255, "Socket Error %d after %d bytes in data after %u blocks!", (int)err, receivedLen, receivedBlocks);
-					else
-						snprintf(acMsg, 255, "Socket Error %d !", (int)err);
+                        }
+                    }
 
-					if (SDRsupportsLogging)
-						SDRLOG(MSG_ERRDLG, acMsg);
-					else
-						::MessageBoxA(0, acMsg, "Socket Error", 0);
-					goto label_reConnect;
-				}
-				else if (CSimpleSocket::SocketEwouldblock == err && SleepMillisWaitingForData >= 0)
-					::Sleep(SleepMillisWaitingForData);
-			}
-		}
+                    ++receivedBlocks;	// network statistics
+
+                    // prepare next receive offset / length
+                    receivedLen -= buffer_len;
+                    receiveOffset -= buffer_len;
+                    if (receivedLen > 0)
+                    {
+                        snprintf(acMsg, 255, "receivedLen - buffer_len = %d != 0", receivedLen);
+                        SDRLOG(extHw_MSG_DEBUG, acMsg);
+                        memcpy(&rcvBuf[receiveBufferIdx][2 * MAX_DECIMATIONS], &rcvBuf[prevBufferIdx][2 * MAX_DECIMATIONS + buffer_len], receivedLen);
+                    }
+                }
+            }
+            else
+            {
+                CSimpleSocket::CSocketError err = conn.GetSocketError();
+                if (CSimpleSocket::SocketSuccess != err && CSimpleSocket::SocketEwouldblock != err)
+                {
+                    char acMsg[256];
+                    if (GUIDebugConnection)
+                        snprintf(acMsg, 255, "Socket Error %d after %d bytes in data after %u blocks!", (int)err, receivedLen, receivedBlocks);
+                    else
+                        snprintf(acMsg, 255, "Socket Error %d !", (int)err);
+                    
+                    if (SDRsupportsLogging)
+                        SDRLOG(extHw_MSG_ERRDLG, acMsg);
+                    else
+                        ::MessageBoxA(0, acMsg, "Socket Error", 0);
+                    goto label_reConnect;
+                }
+                else if (CSimpleSocket::SocketEwouldblock == err && SleepMillisWaitingForData >= 0)
+                    ::Sleep(SleepMillisWaitingForData);
+            }
+        }
 
 label_reConnect:
-		conn.Close();
-		if (!AutoReConnect)
-			break;
-	}
+        conn.Close();
+        if (!AutoReConnect)
+            break;
+    }
 
-	worker_handle = INVALID_HANDLE_VALUE;
-	_endthread();
+    worker_handle = INVALID_HANDLE_VALUE;
+    _endthread();
 }
 
 
@@ -1518,19 +1815,18 @@ static void updateTunerBWs(HWND hwndDlg)
 	ComboBox_SetCurSel(hDlgItmTunerBW, nearestBwIdx(new_TunerBW));
 }
 
-static void updateTunerGains(HWND hwndDlg)
+static void updateRFTunerGains(HWND hwndDlg)
 {
-	// rtlsdr_get_tuner_gains(dev, NULL);
-	HWND hGain = GetDlgItem(hwndDlg, IDC_GAIN);
-	HWND hGainLabel = GetDlgItem(hwndDlg, IDC_GAINVALUE);
+  HWND hRFGain = GetDlgItem(hwndDlg, IDC_RF_GAIN_SLIDER);
+  HWND hGainLabel = GetDlgItem(hwndDlg, IDC_TUNER_RF_GAIN_VALUE);
 	HWND hTunerBwLabel = GetDlgItem(hwndDlg, IDC_TUNER_BW_LABEL);
 
-	gains = tuner_gains[tunerNo].gain;
-	n_gains = tuner_gains[tunerNo].num;
+	rf_gains = tuner_rf_gains[tunerNo].gain;
+	n_rf_gains = tuner_rf_gains[tunerNo].num;
 
 	if (0 == tunerNo)
 		Static_SetText(hTunerBwLabel, TEXT("Tuner Bandwidth:"));
-	else if (0 == n_gains)
+	else if (0 == n_rf_gains)
 	{
 		TCHAR str[255];
 		_stprintf_s(str, 255, TEXT("[ %s-Tuner Bandwidth ]"), TunerName[tunerNo]);
@@ -1543,47 +1839,98 @@ static void updateTunerGains(HWND hwndDlg)
 		Static_SetText(hTunerBwLabel, str);
 	}
 
-	if (n_gains > 0)
+	if (n_rf_gains > 0)
 	{
-		SendMessage(hGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-gains[n_gains - 1]);
-		SendMessage(hGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)-gains[0]);
+    SendMessage(hRFGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-rf_gains[n_rf_gains - 1]);
+    SendMessage(hRFGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)-rf_gains[0]);
 	}
 	else
 	{
-		SendMessage(hGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-100);
-		SendMessage(hGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)0);
+    SendMessage(hRFGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-100);
+    SendMessage(hRFGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)0);
 	}
 
-	SendMessage(hGain, TBM_CLEARTICS, (WPARAM)FALSE, (LPARAM)0);
-	if (n_gains > 0)
+  SendMessage(hRFGain, TBM_CLEARTICS, (WPARAM)FALSE, (LPARAM)0);
+	if (n_rf_gains > 0)
 	{
-		for (int i = 0; i<n_gains; i++)
-			SendMessage(hGain, TBM_SETTIC, (WPARAM)0, (LPARAM)-gains[i]);
+		for (int i = 0; i<n_rf_gains; i++)
+      SendMessage(hRFGain, TBM_SETTIC, (WPARAM)0, (LPARAM)-rf_gains[i]);
 
-		int gainIdx = nearestGainIdx(new_gain);
-		if (new_gain != gains[gainIdx])
+    int gainIdx = nearestGainIdx(new_rf_gain, rf_gains, n_rf_gains);
+    if (new_rf_gain != rf_gains[gainIdx])
 		{
-			new_gain = gains[gainIdx];
+      new_rf_gain = rf_gains[gainIdx];
 			somewhat_changed |= 4;
 		}
-		SendMessage(hGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-new_gain);
+    SendMessage(hRFGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-new_rf_gain);
 	}
 
-	if (new_TunerAGC)
+	if (new_TunerRF_AGC)
 	{
-		EnableWindow(hGain, FALSE);
+    EnableWindow(hRFGain, FALSE);
 		Static_SetText(hGainLabel, TEXT("AGC"));
 	}
 	else
 	{
-		EnableWindow(hGain, TRUE);
-		int pos = -SendMessage(hGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+    EnableWindow(hRFGain, TRUE);
+    int pos = -SendMessage(hRFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
 		TCHAR str[255];
 		_stprintf_s(str, 255, TEXT("%2.1f dB"), (float)pos / 10);
 		Static_SetText(hGainLabel, str);
-		//rtlsdr_set_tuner_gain(dev,gains[gain_d_index]);
 	}
 }
+
+
+static void updateIFTunerGains(HWND hwndDlg)
+{
+  HWND hIFGain = GetDlgItem(hwndDlg, IDC_IF_GAIN_SLIDER);
+  HWND hGainLabel = GetDlgItem(hwndDlg, IDC_TUNER_IF_GAIN_VALUE);
+
+	if_gains = tuner_if_gains[tunerNo].gain;
+	n_if_gains = tuner_if_gains[tunerNo].num;
+
+	if (n_if_gains > 0)
+	{
+    SendMessage(hIFGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-if_gains[n_if_gains - 1]);
+    SendMessage(hIFGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)-if_gains[0]);
+	}
+	else
+	{
+    SendMessage(hIFGain, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)-100);
+    SendMessage(hIFGain, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)0);
+	}
+
+  SendMessage(hIFGain, TBM_CLEARTICS, (WPARAM)FALSE, (LPARAM)0);
+	if (n_if_gains > 0)
+	{
+		for (int i = 0; i<n_if_gains; i++)
+      SendMessage(hIFGain, TBM_SETTIC, (WPARAM)0, (LPARAM)-if_gains[i]);
+
+    int gain_idx = nearestGainIdx(new_if_gain, if_gains, n_if_gains);
+    if (new_if_gain != if_gains[gain_idx])
+    {
+      new_if_gain_idx = gain_idx;
+      new_if_gain = if_gains[new_if_gain_idx];
+      somewhat_changed |= 4096;
+    }
+    SendMessage(hIFGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-new_if_gain);
+	}
+
+	if (new_TunerIF_AGC)
+	{
+    EnableWindow(hIFGain, FALSE);
+		Static_SetText(hGainLabel, TEXT("AGC"));
+	}
+	else
+	{
+    EnableWindow(hIFGain, TRUE);
+    int pos = -SendMessage(hIFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+		TCHAR str[255];
+		_stprintf_s(str, 255, TEXT("%2.1f dB"), (float)pos / 10);
+		Static_SetText(hGainLabel, str);
+	}
+}
+
 
 
 static void updateDecimations(HWND hwndDlg)
@@ -1638,334 +1985,456 @@ static void updateDecimations(HWND hwndDlg)
 
 static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	static HBRUSH BRUSH_RED=CreateSolidBrush(RGB(255,0,0));
-	static HBRUSH BRUSH_GREEN=CreateSolidBrush(RGB(0,255,0));
+    static HBRUSH BRUSH_RED=CreateSolidBrush(RGB(255,0,0));
+    static HBRUSH BRUSH_GREEN=CreateSolidBrush(RGB(0,255,0));
 
-   	switch (uMsg)
+    switch (uMsg)
     {
         case WM_INITDIALOG:
-		{
-			//HWND hGainLabel = GetDlgItem(hwndDlg, IDC_GAINVALUE);
-			HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
+        {
+            HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
+            HWND hDlgItmUsbSB = GetDlgItem(hwndDlg, IDC_USB_SIDEBAND);
 
-			for (int i=0; i<(sizeof(directS)/sizeof(directS[0]));i++)
-				ComboBox_AddString(GetDlgItem(hwndDlg,IDC_DIRECT),directS[i]);
-			ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_DIRECT), new_DirectSampling);
+            for (int i=0; i<(sizeof(directS)/sizeof(directS[0]));i++)
+                ComboBox_AddString(GetDlgItem(hwndDlg,IDC_DIRECT),directS[i]);
+            ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_DIRECT), new_DirectSampling);
 
-			Button_SetCheck(GetDlgItem(hwndDlg, IDC_AUTORECONNECT), AutoReConnect ? BST_CHECKED : BST_UNCHECKED);
+            ComboBox_AddString(GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), TEXT("DC / Center: 0"));
+            ComboBox_AddString(GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), TEXT("Upper Half: + Samplerate/4"));
+            ComboBox_AddString(GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), TEXT("Lower Half: - Samplerate/4"));
+            ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), new_BandCenter_Sel);
 
-			Button_SetCheck(GetDlgItem(hwndDlg, IDC_PERSISTCONNECTION), PersistentConnection ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_AUTORECONNECT), AutoReConnect ? BST_CHECKED : BST_UNCHECKED);
 
-			Button_SetCheck(GetDlgItem(hwndDlg, IDC_TUNERAGC), new_TunerAGC ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_PERSISTCONNECTION), PersistentConnection ? BST_CHECKED : BST_UNCHECKED);
 
-			Button_SetCheck(GetDlgItem(hwndDlg, IDC_RTLAGC), new_RTLAGC ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_TUNER_RF_AGC), new_TunerRF_AGC ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_TUNER_IF_AGC), new_TunerIF_AGC ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_RTL_DIG_AGC), new_RTLAGC ? BST_CHECKED : BST_UNCHECKED);
 
-			Button_SetCheck(GetDlgItem(hwndDlg, IDC_OFFSET), new_OffsetTuning ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_OFFSET), new_OffsetTuning ? BST_CHECKED : BST_UNCHECKED);
 
-			SendMessage(GetDlgItem(hwndDlg,IDC_PPM_S), UDM_SETRANGE  , (WPARAM)TRUE, (LPARAM)MAX_PPM | (MIN_PPM << 16));
-			
-			TCHAR tempStr[255];
-			_stprintf_s(tempStr, 255, TEXT("%d"), new_FreqCorrPPM);
-			Edit_SetText(GetDlgItem(hwndDlg,IDC_PPM), tempStr );
-			//rtlsdr_set_freq_correction(dev, new_FreqCorrPPM);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_USB_SIDEBAND), new_USB_Sideband ? BST_CHECKED : BST_UNCHECKED);
 
-			{
-				TCHAR tempStr[255];
-				_stprintf_s(tempStr, 255, TEXT("%s:%d"), RTL_TCP_IPAddr, RTL_TCP_PortNo);
-				Edit_SetText(GetDlgItem(hwndDlg, IDC_IP_PORT), tempStr);
-			}
+            SendMessage(GetDlgItem(hwndDlg,IDC_PPM_S), UDM_SETRANGE  , (WPARAM)TRUE, (LPARAM)MAX_PPM | (MIN_PPM << 16));
 
-			for (int i = 0; i<n_srates; i++)
-				ComboBox_AddString(GetDlgItem(hwndDlg,IDC_SAMPLERATE),samplerates[i].name);
-			ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_SAMPLERATE), new_srate_idx);
+            TCHAR tempStr[255];
+            _stprintf_s(tempStr, 255, TEXT("%d"), new_FreqCorrPPM);
+            Edit_SetText(GetDlgItem(hwndDlg,IDC_PPM), tempStr );
+            //rtlsdr_set_freq_correction(dev, new_FreqCorrPPM);
 
-			{
-				for (int i = 0; i < (sizeof(buffer_sizes) / sizeof(buffer_sizes[0])); i++)
-				{
-					TCHAR str[255];
-					_stprintf_s(str, 255, TEXT("%d kB"), buffer_sizes[i]);
-					ComboBox_AddString(GetDlgItem(hwndDlg, IDC_BUFFER), str);
-				}
-				ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_BUFFER), bufferSizeIdx);
-				buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
-			}
+            {
+                TCHAR tempStr[255];
+                _stprintf_s(tempStr, 255, TEXT("%s:%d"), RTL_TCP_IPAddr, RTL_TCP_PortNo);
+                Edit_SetText(GetDlgItem(hwndDlg, IDC_IP_PORT), tempStr);
+            }
 
-			updateTunerBWs(hwndDlg);
-			updateTunerGains(hwndDlg);
-			updateDecimations(hwndDlg);
+            for (int i = 0; i<n_srates; i++)
+                ComboBox_AddString(GetDlgItem(hwndDlg,IDC_SAMPLERATE),samplerates[i].name);
+            ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_SAMPLERATE), new_srate_idx);
 
-			return TRUE;
-		}
+            {
+                for (int i = 0; i < (sizeof(buffer_sizes) / sizeof(buffer_sizes[0])); i++)
+                {
+                    TCHAR str[255];
+                    _stprintf_s(str, 255, TEXT("%d kB"), buffer_sizes[i]);
+                    ComboBox_AddString(GetDlgItem(hwndDlg, IDC_BUFFER), str);
+                }
+                ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_BUFFER), bufferSizeIdx);
+                buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
+            }
 
-		case WM_PRINT:
-			if (lParam == (LPARAM)PRF_CLIENT)
-			{
-				HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
-				HWND hDlgItmTunerBW = GetDlgItem(hwndDlg, IDC_TUNERBANDWIDTH);
+            updateTunerBWs(hwndDlg);
+            updateRFTunerGains(hwndDlg);
+            updateDecimations(hwndDlg);
 
-				updateTunerBWs(hwndDlg);
-				updateTunerGains(hwndDlg);
-				updateDecimations(hwndDlg);
+            return TRUE;
+        }
 
-				BOOL enableOffset = (1 == tunerNo) ? TRUE : FALSE;
-				BOOL enableTunerBW = (bandwidths && 0 == new_DirectSampling) ? TRUE : FALSE;
-				EnableWindow(hDlgItmOffset, enableOffset);
-				EnableWindow(hDlgItmTunerBW, enableTunerBW);
+        case WM_PRINT:
+            if (lParam == (LPARAM)PRF_CLIENT)
+            {
+                HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
+                HWND hDlgItmUsbSB = GetDlgItem(hwndDlg, IDC_USB_SIDEBAND);
+                HWND hDlgItmTunerBW = GetDlgItem(hwndDlg, IDC_TUNERBANDWIDTH);
+                HWND hDlgItmBandCenter = GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL);
+                HWND hDlgItmIF_Slider = GetDlgItem(hwndDlg, IDC_IF_GAIN_SLIDER);
+                HWND hDlgItmIF_AGC = GetDlgItem(hwndDlg, IDC_TUNER_IF_AGC);
 
-				const char * tunerText = (tunerNo >= 0 && tunerNo < n_tuners)
-					? TunerName[tunerNo] : "unknown";
-				TCHAR str[255];
-				_stprintf_s(str,255, TEXT("%s-Tuner AGC"), tunerText ); 
-				Static_SetText(GetDlgItem(hwndDlg,IDC_TUNERAGC),str);
-			}
-			return TRUE;
+                updateTunerBWs(hwndDlg);
+                updateRFTunerGains(hwndDlg);
+                updateIFTunerGains(hwndDlg);
+                updateDecimations(hwndDlg);
+            
+                BOOL enableOffset = (1 == tunerNo) ? TRUE : FALSE;
+                BOOL enableSideBand = (5 == tunerNo) ? TRUE : FALSE;
+                BOOL enableBandCenter = (5 == tunerNo) ? TRUE : FALSE;
+                BOOL enableIFGain = (5 == tunerNo) ? TRUE : FALSE;
+                BOOL enableTunerBW = (bandwidths && 0 == new_DirectSampling) ? TRUE : FALSE;
+
+                EnableWindow(hDlgItmOffset, enableOffset);
+                EnableWindow(hDlgItmUsbSB, enableSideBand);
+                EnableWindow(hDlgItmTunerBW, enableTunerBW);
+                EnableWindow(hDlgItmBandCenter, enableBandCenter);
+                EnableWindow(hDlgItmIF_Slider, enableIFGain);
+                EnableWindow(hDlgItmIF_AGC, enableIFGain);
+
+                const char * tunerText = (tunerNo >= 0 && tunerNo < n_tuners)
+                    ? TunerName[tunerNo] : "Tuner?";
+                TCHAR str[255];
+                _stprintf_s(str,255, TEXT("%s AGC"), tunerText ); 
+                Static_SetText(GetDlgItem(hwndDlg, IDC_TUNER_RF_AGC), str);
+            }
+            return TRUE;
 
         case WM_COMMAND:
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
-				case IDC_PPM:
-					if(GET_WM_COMMAND_CMD(wParam, lParam) == EN_CHANGE)
-                    { 
-                        TCHAR ppm[255];
-						Edit_GetText((HWND) lParam, ppm, 255 );
-						new_FreqCorrPPM = _ttoi(ppm);
-						somewhat_changed |= 128;
-						WinradCallBack(-1,WINRAD_LOCHANGE,0,NULL);
-                    }
+            case IDC_PPM:
+                if(GET_WM_COMMAND_CMD(wParam, lParam) == EN_CHANGE)
+                {
+                    TCHAR ppm[255];
+                    Edit_GetText((HWND) lParam, ppm, 255 );
+                    new_FreqCorrPPM = _ttoi(ppm);
+                    somewhat_changed |= 128;
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_LO);
+                }
+                return TRUE;
+            case IDC_RTL_DIG_AGC:
+                {
+                    new_RTLAGC = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    somewhat_changed |= 16;
                     return TRUE;
-                case IDC_RTLAGC:
-				{
-					new_RTLAGC = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
-					somewhat_changed |= 16;
-					return TRUE;
-				}
-                case IDC_OFFSET:
-				{
-					HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
+                }
+            case IDC_OFFSET:
+                {
+                    HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
 
-					new_OffsetTuning = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
-					somewhat_changed |= 64;
+                    new_OffsetTuning = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    somewhat_changed |= 64;
 
-					// E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
-					if (1 == rtl_tcp_dongle_info.ui[1])
-						EnableWindow(hDlgItmOffset, TRUE);
-					else
-						EnableWindow(hDlgItmOffset, FALSE);
-					return TRUE;
-				}
-				case IDC_TUNERAGC:
-				{
-					HWND hGain = GetDlgItem(hwndDlg, IDC_GAIN);
-					HWND hGainLabel = GetDlgItem(hwndDlg, IDC_GAINVALUE);
+                    // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+                    EnableWindow(hDlgItmOffset, (1 == rtl_tcp_dongle_info.ui[1]) ? TRUE : FALSE);
 
-					if(Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) //it is checked
-					{
-						new_TunerAGC = 1;	// automatic
-						somewhat_changed |= 8;
-
-						EnableWindow(hGain,FALSE);
-						Static_SetText(hGainLabel, TEXT("AGC"));
-					}
-					else //it has been unchecked
-					{
-						//rtlsdr_set_tuner_gain_mode(dev,1);
-						new_TunerAGC = 0;	// manual
-						somewhat_changed |= 8;
-
-						EnableWindow(hGain,TRUE);
-
-						int pos=-SendMessage(hGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
-						TCHAR str[255];
-						_stprintf_s(str,255, TEXT("%2.1f dB"),(float) pos/10); 
-						Static_SetText(hGainLabel, str);
-					}
-					return TRUE;
-				}
-
-				case IDC_AUTORECONNECT:
-				{
-					AutoReConnect = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
-					return TRUE;
-				}
-
-				case IDC_PERSISTCONNECTION:
-				{
-					PersistentConnection = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
-					if (!PersistentConnection && !ThreadStreamToSDR)
-						Stop_Thread();
-					return TRUE;
-				}
-
-				case IDC_SAMPLERATE:
-					if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
-                    { 
-						new_srate_idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
-						somewhat_changed |= 2;
-						updateDecimations(hwndDlg);
-						WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
-                    }
-					if(GET_WM_COMMAND_CMD(wParam, lParam) ==  CBN_EDITUPDATE)
-                    { 
-                        TCHAR  ListItem[256];
-						ComboBox_GetText((HWND) lParam,ListItem,256);
-						TCHAR *endptr;
-						double coeff = _tcstod(ListItem, &endptr);
-						
-						while (_istspace(*endptr)) ++endptr;
-
-						int exp = 1;	
-						switch (_totupper(*endptr)) {
-							case 'K': exp = 1000; break;
-							case 'M': exp = 1000*1000; break;
-						}
-						
-						uint32_t newrate = uint32_t( coeff * exp );
-						if (newrate>=MINRATE && newrate<=MAXRATE) {
-							//rtlsdr_set_sample_rate(dev, newrate);
-// @TODO!
-							WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
-						}
-
-                    }
                     return TRUE;
+                }
+            case IDC_USB_SIDEBAND:
+                {
+                    HWND hDlgItmUsbSB = GetDlgItem(hwndDlg, IDC_USB_SIDEBAND);
 
-				case IDC_BUFFER:
-					if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                    new_USB_Sideband = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    somewhat_changed |= 64;
+
+                    // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+                    EnableWindow(hDlgItmUsbSB, (5 == rtl_tcp_dongle_info.ui[1]) ? TRUE : FALSE);
+
+                    return TRUE;
+                }
+            case IDC_TUNER_RF_AGC:
+                {
+                    HWND hRFGain = GetDlgItem(hwndDlg, IDC_RF_GAIN_SLIDER);
+                    HWND hGainLabel = GetDlgItem(hwndDlg, IDC_TUNER_RF_GAIN_VALUE);
+                    if(Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) //it is checked
                     {
-						bufferSizeIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
-						buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
-						WinradCallBack(-1,WINRAD_SRCHANGE,0,NULL);// Signal application
-						if (SDRsupportsLogging)
-							SDRLOG(MSG_ERRDLG, "Restart SDR application,\nthat changed buffer size has effect!");
-						else
-							::MessageBoxA(NULL, "Restart SDR application,\nthat changed buffer size has effect!", "Info", 0);
+                        new_TunerRF_AGC = 1;	// automatic
+                        somewhat_changed |= 8;
+                        EnableWindow(hRFGain, FALSE);
+                        Static_SetText(hGainLabel, TEXT("HF AGC"));
                     }
+                    else //it has been unchecked
+                    {
+                        //rtlsdr_set_tuner_gain_mode(dev,1);
+                        new_TunerRF_AGC = 0;	// manual
+                        somewhat_changed |= 8;
+                        EnableWindow(hRFGain, TRUE);
+                        int pos = -SendMessage(hRFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+                        TCHAR str[255];
+                        _stprintf_s(str,255, TEXT("%2.1f dB"),(float) pos/10); 
+                        Static_SetText(hGainLabel, str);
+                    }
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_RF_IF);  // Signal application
                     return TRUE;
+                }
 
-				case IDC_TUNERBANDWIDTH:
-					if (GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
-					{
-						int bwIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
-						new_TunerBW = bandwidths[bwIdx];
-						somewhat_changed |= 256;
-						updateDecimations(hwndDlg);
-					}
-					return TRUE;
+            case IDC_TUNER_IF_AGC:
+                {
+                    HWND hIFGain = GetDlgItem(hwndDlg, IDC_IF_GAIN_SLIDER);
+                    HWND hGainLabel = GetDlgItem(hwndDlg, IDC_TUNER_IF_GAIN_VALUE);
+                    if(Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) //it is checked
+                    {
+                        new_TunerIF_AGC = 1;	// automatic
+                        last_if_gain = new_if_gain + 1;
+                        last_if_gain_idx = new_if_gain_idx + 1;
+                        somewhat_changed |= 4096;
+                        EnableWindow(hIFGain, FALSE);
+                        Static_SetText(hGainLabel, TEXT("IF AGC"));
+                    }
+                    else //it has been unchecked
+                    {
+                        new_TunerIF_AGC = 0;	// manual
+                        last_if_gain = new_if_gain + 1;
+                        last_if_gain_idx = new_if_gain_idx + 1;
+                        somewhat_changed |= 4096;
+                        // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+                        EnableWindow(hIFGain, (5 == rtl_tcp_dongle_info.ui[1]) ? TRUE : FALSE);
+                        int pos = -SendMessage(hIFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+                        TCHAR str[255];
+                        _stprintf_s(str,255, TEXT("%2.1f dB"),(float) pos/10); 
+                        Static_SetText(hGainLabel, str);
+                    }
 
-				case IDC_DECIMATION:
-					if (GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
-					{
-						// idx , decimation
-						// 0, 1
-						// 1, 2
-						// 2, 4
-						// 3, 6
-						// 4, 8
-						int idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
-						new_Decimation = (idx == 0) ? 1 : (2 * idx);
-						somewhat_changed |= 512;
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_RF_IF);  // Signal application
+                    return TRUE;
+                }
 
+            case IDC_AUTORECONNECT:
+                {
+                    AutoReConnect = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    return TRUE;
+                }
+            case IDC_PERSISTCONNECTION:
+                {
+                    PersistentConnection = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    if (!PersistentConnection && !ThreadStreamToSDR)
+                        Stop_Thread();
+                    return TRUE;
+                }
+            case IDC_SAMPLERATE:
+                if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    new_srate_idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    somewhat_changed |= 2;
+                    updateDecimations(hwndDlg);
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SampleRate);  // Signal application
+                }
+                if (GET_WM_COMMAND_CMD(wParam, lParam) ==  CBN_EDITUPDATE)
+                {
+                    TCHAR  ListItem[256];
+                    ComboBox_GetText((HWND) lParam,ListItem,256);
+                    TCHAR *endptr;
+                    double coeff = _tcstod(ListItem, &endptr);
+                    while (_istspace(*endptr)) ++endptr;
+
+                    int exp = 1;
+                    switch (_totupper(*endptr)) {
+                        case 'K': exp = 1000; break;
+                        case 'M': exp = 1000*1000; break;
+                    }
+
+                    uint32_t newrate = uint32_t( coeff * exp );
+                    if (newrate>=MINRATE && newrate<=MAXRATE) {
+                        //rtlsdr_set_sample_rate(dev, newrate);
+// @TODO!
+                      EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SampleRate);  // Signal application
+                    }
+
+                }
+                return TRUE;
+
+            case IDC_BUFFER:
+                if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    bufferSizeIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    buffer_len = buffer_sizes[bufferSizeIdx] * 1024;
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SampleRate);  // Signal application
+                    if (SDRsupportsLogging)
+                        SDRLOG(extHw_MSG_ERRDLG, "Restart SDR application,\nthat changed buffer size has effect!");
+                    else
+                        ::MessageBoxA(NULL, "Restart SDR application,\nthat changed buffer size has effect!", "Info", 0);
+                }
+                return TRUE;
+
+            case IDC_TUNERBANDWIDTH:
+                if (GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    int bwIdx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    new_TunerBW = bandwidths[bwIdx];
+                    somewhat_changed |= 256;
+                    updateDecimations(hwndDlg);
+                }
+                return TRUE;
+
+            case IDC_DECIMATION:
+                if (GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    // idx , decimation
+                    // 0, 1
+                    // 1, 2
+                    // 2, 4
+                    // 3, 6
+                    // 4, 8
+                    int idx = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    new_Decimation = (idx == 0) ? 1 : (2 * idx);
+                    somewhat_changed |= 512;
 #if ( ALWAYS_PCMU8 == 0 && ALWAYS_PCM16 == 0 )
-						if (SDRsupportsSamplePCMU8 && SDRsupportsSampleFormats)
-						{
-							if (new_Decimation == 1)
-							{
-								extHWtype = exthwUSBdataU8;		// 8bit samples are sufficient when not using decimation
-								WinradCallBack(-1, HDSDR_SAMPLE_FMT_PCMU8, 0, NULL);
-							}
-							else
-							{
-								extHWtype = exthwUSBdata16;		// with decimation 16-bit samples are necessary
-								WinradCallBack(-1, HDSDR_SAMPLE_FMT_PCM16, 0, NULL);
-							}
-						}
-#endif
-
-						WinradCallBack(-1, WINRAD_SRATES_CHANGED, 0, NULL);// Signal application
-						WinradCallBack(-1, WINRAD_SRCHANGE, 0, NULL);// Signal application
-					}
-					return TRUE;
-
-				case IDC_DIRECT:
-					if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
-                    { 
-						new_DirectSampling = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
-						somewhat_changed |= 32;
-
-						WinradCallBack(-1,WINRAD_LOCHANGE,0,NULL);// Signal application
+                    if (SDRsupportsSamplePCMU8 && SDRsupportsSampleFormats)
+                    {
+                        if (new_Decimation == 1)
+                        {
+                            extHWtype = exthwUSBdataU8;   // 8bit samples are sufficient when not using decimation
+                            EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_SampleFormat_PCMU8);
+                        }
+                        else
+                        {
+                            extHWtype = exthwUSBdata16;   // with decimation 16-bit samples are necessary
+                            EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_SampleFormat_PCM16);
+                        }
                     }
-                    return TRUE;
+#endif
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SRATES);  // Signal application
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_SampleRate);  // Signal application
+                }
+                return TRUE;
 
-				case IDC_IP_PORT:
-					if (GET_WM_COMMAND_CMD(wParam, lParam) == EN_CHANGE)
-					{
-						TCHAR tempStr[255];
-						Edit_GetText((HWND)lParam, tempStr, 255);
-						//rtlsdr_set_freq_correction(dev, _ttoi(ppm))
-						char * IP = strtok(tempStr, ":");
-						if (IP)
-							snprintf(RTL_TCP_IPAddr, 31, "%s", IP);
-						char * PortStr = strtok(NULL, ":");
-						if (PortStr)
-						{
-							int PortNo = atoi(PortStr);
-							if (PortNo > 0 && PortNo < 65536)
-								RTL_TCP_PortNo = PortNo;
-						}
-					}
-					return TRUE;
-			}
+            case IDC_DIRECT:
+                if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    new_DirectSampling = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    somewhat_changed |= 32;
+
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_LO);  // Signal application
+                }
+                return TRUE;
+
+            case IDC_BAND_CENTER_SEL:
+                if(GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
+                {
+                    const int64_t old_tuneFreq = new_tuneFreq;
+                    int64_t tmp_LO_freq = new_LO_freq;
+                    const int fs = samplerates[new_srate_idx].valueInt;
+                    new_BandCenter_Sel = ComboBox_GetCurSel(GET_WM_COMMAND_HWND(wParam, lParam));
+                    int band_center = 0;
+                    if (new_BandCenter_Sel == 1)
+                        band_center = fs / 4;
+                    else if (new_BandCenter_Sel == 2)
+                        band_center = -fs / 4;
+                    new_BandCenter_LO_Delta = band_center;
+
+                    if (last_BandCenter_Sel == 1)  // -> +fs/4
+                      tmp_LO_freq += fs / 4;
+                    else if (last_BandCenter_Sel == 2)  // -> -fs/4
+                      tmp_LO_freq -= fs / 4;
+
+                    if (new_BandCenter_Sel == 1)  // -> +fs/4
+                      tmp_LO_freq -= fs / 4;
+                    else if (new_BandCenter_Sel == 2)  // -> -fs/4
+                      tmp_LO_freq += fs / 4;
+
+                    new_LO_freq = tmp_LO_freq;
+                    somewhat_changed |= (1 + 2048);
+
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_LO);
+
+                    // looks, we need to delay tuning back to previous frequency!
+                    retune_value = old_tuneFreq;
+                    retune_counter = fs / 10;
+                    retune_freq = true;
+
+                    // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+                    EnableWindow( GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), (5 == rtl_tcp_dongle_info.ui[1]) ? TRUE : FALSE);
+                }
+                return TRUE;
+
+            case IDC_IP_PORT:
+                if (GET_WM_COMMAND_CMD(wParam, lParam) == EN_CHANGE)
+                {
+                    TCHAR tempStr[255];
+                    Edit_GetText((HWND)lParam, tempStr, 255);
+                    //rtlsdr_set_freq_correction(dev, _ttoi(ppm))
+                    char * IP = strtok(tempStr, ":");
+                    if (IP)
+                        snprintf(RTL_TCP_IPAddr, 31, "%s", IP);
+                    char * PortStr = strtok(NULL, ":");
+                    if (PortStr)
+                    {
+                        int PortNo = atoi(PortStr);
+                        if (PortNo > 0 && PortNo < 65536)
+                            RTL_TCP_PortNo = PortNo;
+                    }
+                }
+                return TRUE;
+            }
             break;
 
-		case WM_VSCROLL:
-			{
-				HWND hGain = GetDlgItem(hwndDlg, IDC_GAIN);
-				if ((HWND)lParam == hGain)
-				{
-					int pos = -SendMessage(hGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
-					for (int i = 0; i < n_gains - 1; ++i)
-						if (gains[i] < pos && pos < gains[i + 1])
-							if ((pos - gains[i]) < (gains[i + 1] - pos) && (LOWORD(wParam) != TB_LINEUP) || (LOWORD(wParam) == TB_LINEDOWN))
-								pos = gains[i];
-							else
-								pos = gains[i + 1];
+        case WM_VSCROLL:
+        {
+            HWND hRFGain = GetDlgItem(hwndDlg, IDC_RF_GAIN_SLIDER);
+            if ((HWND)lParam == hRFGain)
+            {
+                int pos = -SendMessage(hRFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+                for (int i = 0; i < n_rf_gains - 1; ++i)
+                    if (rf_gains[i] < pos && pos < rf_gains[i + 1])
+                    {
+                        if ((pos - rf_gains[i]) < (rf_gains[i + 1] - pos) && (LOWORD(wParam) != TB_LINEUP) || (LOWORD(wParam) == TB_LINEDOWN))
+                            pos = rf_gains[i];
+                        else
+                            pos = rf_gains[i + 1];
+                    }
 
-					SendMessage(hGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
-					TCHAR str[255];
-					_stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
-					Static_SetText(GetDlgItem(hwndDlg, IDC_GAINVALUE), str);
+                SendMessage(hRFGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
+                TCHAR str[255];
+                _stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
+                Static_SetText(GetDlgItem(hwndDlg, IDC_TUNER_RF_GAIN_VALUE), str);
 
-					if (pos != last_gain)
-					{
-						new_gain = pos;
-						somewhat_changed |= 4;
-						WinradCallBack(-1, WINRAD_ATTCHANGE, 0, NULL);
-					}
+                if (pos != last_rf_gain)
+                {
+                    new_rf_gain = pos;
+                    somewhat_changed |= 4;
+                    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_ATT);
+                }
+                return TRUE;
+            }
 
-					return TRUE;
-				}
-				if ((HWND)lParam == GetDlgItem(hwndDlg, IDC_PPM_S))
-				{
-					return TRUE;
-				}
-			}
-			break;
+            HWND hIFGain = GetDlgItem(hwndDlg, IDC_IF_GAIN_SLIDER);
+            if ((HWND)lParam == hIFGain)
+            {
+                int pos = -SendMessage(hIFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
+                for (int i = 0; i < n_if_gains - 1; ++i)
+                    if (if_gains[i] < pos && pos < if_gains[i + 1])
+                    {
+                        if ((pos - if_gains[i]) < (if_gains[i + 1] - pos) && (LOWORD(wParam) != TB_LINEUP) || (LOWORD(wParam) == TB_LINEDOWN))
+                            pos = if_gains[i];
+                        else
+                            pos = if_gains[i + 1];
+                    }
+
+                SendMessage(hIFGain, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)-pos);
+                TCHAR str[255];
+                _stprintf_s(str, 255, TEXT("%2.1f  dB"), (float)pos / 10);
+                Static_SetText(GetDlgItem(hwndDlg, IDC_TUNER_IF_GAIN_VALUE), str);
+
+                if (pos != last_if_gain)
+                {
+                    new_if_gain = pos;
+                    new_if_gain_idx = nearestGainIdx(new_if_gain, if_gains, n_if_gains);
+                    somewhat_changed |= 4096;
+                    //EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Changed_ATT);
+                }
+                return TRUE;
+            }
+
+            if ((HWND)lParam == GetDlgItem(hwndDlg, IDC_PPM_S))
+            {
+                return TRUE;
+            }
+        }
+        break;
 
         case WM_CLOSE:
-			ShowWindow(hwndDlg, SW_HIDE);
+            ShowWindow(hwndDlg, SW_HIDE);
             return TRUE;
-			break;
+            break;
 
-		case WM_DESTROY:
-			h_dialog=NULL;
-			return TRUE;
-			break;
+        case WM_DESTROY:
+            h_dialog=NULL;
+            return TRUE;
+            break;
 
-		/*
-		* TODO: Add more messages, when needed.
-		*/
-	}
+        /*
+        * TODO: Add more messages, when needed.
+        */
+    }
 
-	return FALSE;
+    return FALSE;
 }
 

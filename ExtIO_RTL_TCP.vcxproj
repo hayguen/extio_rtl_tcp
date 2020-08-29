@@ -138,6 +138,7 @@
     <ClInclude Include="$(SolutionDir)\..\clsocket\src\SimpleSocket.h" />
     <ClInclude Include="$(SolutionDir)\..\clsocket\src\StatTimer.h" />
     <ClInclude Include="src\ExtIO_RTL.h" />
+    <ClInclude Include="src\LC_ExtIO_Types.h" />
     <ClInclude Include="src\resource.h" />
     <ClInclude Include="src\targetver.h" />
   </ItemGroup>
