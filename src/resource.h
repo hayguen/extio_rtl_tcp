@@ -25,3 +25,8 @@
 #define IDC_BAND_CENTER_FREQ                    1022
 #define IDC_TUNER_IF_AGC                        1023
 #define IDC_USB_SIDEBAND                        1024
+#define IDC_GPIO_A                              1030
+#define IDC_GPIO_B                              1031
+#define IDC_GPIO_C                              1032
+#define IDC_GPIO_D                              1033
+#define IDC_GPIO_E                              1034

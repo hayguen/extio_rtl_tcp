@@ -27,7 +27,7 @@
 
 #define WITH_AGCS		0
 
-#define SETTINGS_IDENTIFIER "RTL_TCP_2020.1"
+#define SETTINGS_IDENTIFIER "RTL_TCP_2020.1-2"
 
 
 #include <stdint.h>
@@ -300,6 +300,7 @@ static volatile int somewhat_changed = 0;
     // 1024 == tuner sideband
     // 2048 == tuner band center
     // 4096 == tuner if agc / if gain
+    // 8192 == gpio changed
 
 static volatile int64_t last_LO_freq = 100000000;
 static volatile int64_t new_LO_freq = 100000000;
@@ -352,6 +353,15 @@ static volatile int new_OffsetTuning = 0;
 
 static volatile int last_USB_Sideband = 0;
 static volatile int new_USB_Sideband = 0;
+
+#define NUM_GPIO_BUTTONS  5
+//                                                 A  B  C  D  E
+static volatile int GPIO_pin[NUM_GPIO_BUTTONS] = { 0, 1, 2, 4, 5 };
+static volatile int GPIO_inv[NUM_GPIO_BUTTONS] = { 0, 0, 0, 0, 0 };
+static volatile int GPIO_en[NUM_GPIO_BUTTONS] = { 1, 1, 1, 1, 1 };
+static char GPIO_txt[NUM_GPIO_BUTTONS][16] = { "4.5V BIAS TEE", "GPIO1 / PIN32", "GPIO2 / PIN31", "GPIO4 / PIN30", "GPIO5 / PIN29" };
+static volatile int last_GPIO[NUM_GPIO_BUTTONS] = { -9, -9, -9, -9, -9 };
+static volatile int new_GPIO[NUM_GPIO_BUTTONS] = { 0 };
 
 static volatile int last_FreqCorrPPM = 0;
 static volatile int new_FreqCorrPPM = 0;
@@ -884,6 +894,32 @@ enum class Setting {
 , R820T_BAND_CENTER_SEL     // int new_BandCenter_Sel = 0
 , R820T_BAND_CENTER_DELTA   // int new_BandCenter_LO_Delta = 0
 , R820T_USB_SIDEBAND        // int new_USB_Sideband = 0
+
+, RTL_GPIO_A_PIN_EN
+, RTL_GPIO_A_INVERT
+, RTL_GPIO_A_VALUE
+, RTL_GPIO_A_LABEL
+
+, RTL_GPIO_B_PIN_EN
+, RTL_GPIO_B_INVERT
+, RTL_GPIO_B_VALUE
+, RTL_GPIO_B_LABEL
+
+, RTL_GPIO_C_PIN_EN
+, RTL_GPIO_C_INVERT
+, RTL_GPIO_C_VALUE
+, RTL_GPIO_C_LABEL
+
+, RTL_GPIO_D_PIN_EN
+, RTL_GPIO_D_INVERT
+, RTL_GPIO_D_VALUE
+, RTL_GPIO_D_LABEL
+
+, RTL_GPIO_E_PIN_EN
+, RTL_GPIO_E_INVERT
+, RTL_GPIO_E_VALUE
+, RTL_GPIO_E_LABEL
+
 , NUM   // Last One == Amount
 };
 
@@ -891,7 +927,7 @@ enum class Setting {
 extern "C"
 int   LIBRTL_API __stdcall ExtIoGetSetting( int idx, char * description, char * value )
 {
-  switch (idx)
+  switch ( Setting(idx) )
   {
   case Setting::ID:
     snprintf( description, 1024, "%s", "Identifier" );
@@ -985,6 +1021,87 @@ int   LIBRTL_API __stdcall ExtIoGetSetting( int idx, char * description, char * 
   case Setting::R820T_USB_SIDEBAND:       // int new_USB_Sideband = 0
     snprintf(description, 1024, "%s", "R820T/2_Tune_Upper_Sideband");
     snprintf(value, 1024, "%d", new_USB_Sideband);
+    return 0;
+
+  case Setting::RTL_GPIO_A_PIN_EN:
+    snprintf(description, 1024, "%s", "GPIO Button A: Pin Number (0 .. 7), -1 for BiasT, other values to disable");
+    snprintf(value, 1024, "%d", GPIO_en[0] ? GPIO_pin[0] : (-10 - GPIO_pin[0]) );
+    return 0;
+  case Setting::RTL_GPIO_A_INVERT:
+    snprintf(description, 1024, "%s", "GPIO Button A: Invert Pin Value?: 0 = value as CheckBox. 1 = inverted");
+    snprintf(value, 1024, "%d", GPIO_inv[0]);
+    return 0;
+  case Setting::RTL_GPIO_A_VALUE:
+    snprintf(description, 1024, "%s", "GPIO Button A: Checkbox Value?: 0 = unchecked. 1 = checked");
+    snprintf(value, 1024, "%d", new_GPIO[0]);
+    return 0;
+  case Setting::RTL_GPIO_A_LABEL:
+    snprintf(description, 1024, "%s", "GPIO Button A: Label to be shown at CheckBox - max size 16");
+    snprintf(value, 1024, "%s", &GPIO_txt[0][0]);
+    return 0;
+  case Setting::RTL_GPIO_B_PIN_EN:
+    snprintf(description, 1024, "%s", "GPIO Button B: Pin Number (0 .. 7), -1 for BiasT, other values to disable");
+    snprintf(value, 1024, "%d", GPIO_en[1] ? GPIO_pin[1] : (-10 - GPIO_pin[1]) );
+    return 0;
+  case Setting::RTL_GPIO_B_INVERT:
+    snprintf(description, 1024, "%s", "GPIO Button B: Invert Pin Value?: 0 = value as CheckBox. 1 = inverted");
+    snprintf(value, 1024, "%d", GPIO_inv[1]);
+    return 0;
+  case Setting::RTL_GPIO_B_VALUE:
+    snprintf(description, 1024, "%s", "GPIO Button B: Checkbox Value?: 0 = unchecked. 1 = checked");
+    snprintf(value, 1024, "%d", new_GPIO[1]);
+    return 0;
+  case Setting::RTL_GPIO_B_LABEL:
+    snprintf(description, 1024, "%s", "GPIO Button B: Label to be shown at CheckBox - max size 16");
+    snprintf(value, 1024, "%s", &GPIO_txt[1][0]);
+    return 0;
+  case Setting::RTL_GPIO_C_PIN_EN:
+    snprintf(description, 1024, "%s", "GPIO Button C: Pin Number (0 .. 7), -1 for BiasT, other values to disable");
+    snprintf(value, 1024, "%d", GPIO_en[2] ? GPIO_pin[2] : (-10 - GPIO_pin[2]) );
+    return 0;
+  case Setting::RTL_GPIO_C_INVERT:
+    snprintf(description, 1024, "%s", "GPIO Button C: Invert Pin Value?: 0 = value as CheckBox. 1 = inverted");
+    snprintf(value, 1024, "%d", GPIO_inv[2]);
+    return 0;
+  case Setting::RTL_GPIO_C_VALUE:
+    snprintf(description, 1024, "%s", "GPIO Button C: Checkbox Value?: 0 = unchecked. 1 = checked");
+    snprintf(value, 1024, "%d", new_GPIO[2]);
+    return 0;
+  case Setting::RTL_GPIO_C_LABEL:
+    snprintf(description, 1024, "%s", "GPIO Button C: Label to be shown at CheckBox - max size 16");
+    snprintf(value, 1024, "%s", &GPIO_txt[2][0]);
+    return 0;
+  case Setting::RTL_GPIO_D_PIN_EN:
+    snprintf(description, 1024, "%s", "GPIO Button D: Pin Number (0 .. 7), -1 for BiasT, other values to disable");
+    snprintf(value, 1024, "%d", GPIO_en[3] ? GPIO_pin[3] : (-10 - GPIO_pin[3]) );
+    return 0;
+  case Setting::RTL_GPIO_D_INVERT:
+    snprintf(description, 1024, "%s", "GPIO Button D: Invert Pin Value?: 0 = value as CheckBox. 1 = inverted");
+    snprintf(value, 1024, "%d", GPIO_inv[3]);
+    return 0;
+  case Setting::RTL_GPIO_D_VALUE:
+    snprintf(description, 1024, "%s", "GPIO Button D: Checkbox Value?: 0 = unchecked. 1 = checked");
+    snprintf(value, 1024, "%d", new_GPIO[3]);
+    return 0;
+  case Setting::RTL_GPIO_D_LABEL:
+    snprintf(description, 1024, "%s", "GPIO Button D: Label to be shown at CheckBox - max size 16");
+    snprintf(value, 1024, "%s", &GPIO_txt[3][0]);
+    return 0;
+  case Setting::RTL_GPIO_E_PIN_EN:
+    snprintf(description, 1024, "%s", "GPIO Button E: Pin Number (0 .. 7), -1 for BiasT, other values to disable");
+    snprintf(value, 1024, "%d", GPIO_en[4] ? GPIO_pin[4] : (-10 - GPIO_pin[4]) );
+    return 0;
+  case Setting::RTL_GPIO_E_INVERT:
+    snprintf(description, 1024, "%s", "GPIO Button E: Invert Pin Value?: 0 = value as CheckBox. 1 = inverted");
+    snprintf(value, 1024, "%d", GPIO_inv[4]);
+    return 0;
+  case Setting::RTL_GPIO_E_VALUE:
+    snprintf(description, 1024, "%s", "GPIO Button E: Checkbox Value?: 0 = unchecked. 1 = checked");
+    snprintf(value, 1024, "%d", new_GPIO[4]);
+    return 0;
+  case Setting::RTL_GPIO_E_LABEL:
+    snprintf(description, 1024, "%s", "GPIO Button E: Label to be shown at CheckBox - max size 16");
+    snprintf(value, 1024, "%s", &GPIO_txt[4][0]);
     return 0;
 
   default:
@@ -1091,6 +1208,82 @@ void  LIBRTL_API __stdcall ExtIoSetSetting( int idx, const char * value )
   case Setting::R820T_USB_SIDEBAND:       // int new_USB_Sideband = 0
     new_USB_Sideband = atoi(value) ? 1 : 0;
     break;
+
+  case Setting::RTL_GPIO_A_PIN_EN:
+    tempInt = atoi(value);
+    GPIO_pin[0] = (tempInt >= -1) ? tempInt : (-10 - tempInt);
+    GPIO_en[0] = (-1 <= GPIO_pin[0] && GPIO_pin[0] < 8) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_A_INVERT:
+    GPIO_inv[0] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_A_VALUE:
+    new_GPIO[0] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_A_LABEL:
+    snprintf(&GPIO_txt[0][0], 15, "%s", value); GPIO_txt[0][15] = 0;
+    break;
+
+  case Setting::RTL_GPIO_B_PIN_EN:
+    tempInt = atoi(value);
+    GPIO_pin[1] = (tempInt >= -1) ? tempInt : (-10 - tempInt);
+    GPIO_en[1] = (-1 <= GPIO_pin[1] && GPIO_pin[1] < 8) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_B_INVERT:
+    GPIO_inv[1] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_B_VALUE:
+    new_GPIO[1] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_B_LABEL:
+    snprintf(&GPIO_txt[1][0], 15, "%s", value); GPIO_txt[1][15] = 0;
+    break;
+
+  case Setting::RTL_GPIO_C_PIN_EN:
+    tempInt = atoi(value);
+    GPIO_pin[2] = (tempInt >= -1) ? tempInt : (-10 - tempInt);
+    GPIO_en[2] = (-1 <= GPIO_pin[2] && GPIO_pin[2] < 8) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_C_INVERT:
+    GPIO_inv[2] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_C_VALUE:
+    new_GPIO[2] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_C_LABEL:
+    snprintf(&GPIO_txt[2][0], 15, "%s", value); GPIO_txt[2][15] = 0;
+    break;
+
+  case Setting::RTL_GPIO_D_PIN_EN:
+    tempInt = atoi(value);
+    GPIO_pin[3] = (tempInt >= -1) ? tempInt : (-10 - tempInt);
+    GPIO_en[3] = (-1 <= GPIO_pin[3] && GPIO_pin[3] < 8) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_D_INVERT:
+    GPIO_inv[3] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_D_VALUE:
+    new_GPIO[3] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_D_LABEL:
+    snprintf(&GPIO_txt[3][0], 15, "%s", value); GPIO_txt[3][15] = 0;
+    break;
+
+  case Setting::RTL_GPIO_E_PIN_EN:
+    tempInt = atoi(value);
+    GPIO_pin[4] = (tempInt >= -1) ? tempInt : (-10 - tempInt);
+    GPIO_en[4] = (-1 <= GPIO_pin[4] && GPIO_pin[4] < 8) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_E_INVERT:
+    GPIO_inv[4] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_E_VALUE:
+    new_GPIO[4] = atoi(value) ? 1 : 0;
+    break;
+  case Setting::RTL_GPIO_E_LABEL:
+    snprintf(&GPIO_txt[4][0], 15, "%s", value); GPIO_txt[4][15] = 0;
+    break;
+
   }
 }
 
@@ -1322,6 +1515,42 @@ void ThreadProc(void *p)
         rtl_tcp_dongle_info.ui[1] = tunerNo = ntohl(rtl_tcp_dongle_info.ui[1]);
         rtl_tcp_dongle_info.ui[2] = numTunerGains = ntohl(rtl_tcp_dongle_info.ui[2]);
 
+        // E4000 = 1, FC0012 = 2, FC0013 = 3, FC2580 = 4, R820T = 5, R828D = 6
+        if (tunerNo == 2 || tunerNo == 4)
+        {
+          // avoid RESET of Tuner: disable GPIO4
+          for (int btnNo = 0; btnNo < NUM_GPIO_BUTTONS; ++btnNo)
+          {
+            if (GPIO_en[btnNo] && GPIO_pin[btnNo] == 4)
+            {
+              GPIO_en[btnNo] = 0;
+              if (h_dialog)
+              {
+                HWND hDlgItmGPIObtn = GetDlgItem(h_dialog, IDC_GPIO_A + btnNo);
+                //SendMessage(hDlgItmGPIObtn, WM_ENABLE, (WPARAM)(GPIO_en[btnNo] ? TRUE : FALSE), NULL);
+                EnableWindow(hDlgItmGPIObtn, GPIO_en[btnNo] ? TRUE : FALSE);
+              }
+            }
+          }
+        }
+        else
+        {
+          // re-enable GPIO4 with other Tuners
+          for (int btnNo = 0; btnNo < NUM_GPIO_BUTTONS; ++btnNo)
+          {
+            if (!GPIO_en[btnNo] && GPIO_pin[btnNo] == 4)
+            {
+              GPIO_en[btnNo] = 1;
+              if (h_dialog)
+              {
+                HWND hDlgItmGPIObtn = GetDlgItem(h_dialog, IDC_GPIO_A + btnNo);
+                //SendMessage(hDlgItmGPIObtn, WM_ENABLE, (WPARAM)(GPIO_en[btnNo] ? TRUE : FALSE), NULL);
+                EnableWindow(hDlgItmGPIObtn, GPIO_en[btnNo] ? TRUE : FALSE);
+              }
+            }
+          }
+        }
+
         GotTunerInfo = true;
         if (h_dialog)
             PostMessage(h_dialog, WM_PRINT, (WPARAM)0, (LPARAM)PRF_CLIENT);
@@ -1396,6 +1625,20 @@ void ThreadProc(void *p)
                         break;
                     last_USB_Sideband = new_USB_Sideband;
                     somewhat_changed &= ~(1024);
+                }
+                for (int btnNo = 0; btnNo < NUM_GPIO_BUTTONS; ++btnNo)
+                {
+                  if (GPIO_en[btnNo] && (last_GPIO[btnNo] != new_GPIO[btnNo] || commandEverything))
+                  {
+                    const int GPIOpin = GPIO_pin[btnNo];
+                    const int GPIOval = new_GPIO[btnNo] ^ GPIO_inv[btnNo];
+                    if (GPIOpin < 0)
+                      transmitTcpCmd(conn, 0x0E, GPIOval); // SET_BIAS_TEE
+                    else
+                      transmitTcpCmd(conn, 0x52, (GPIOpin << 16) | GPIOval); // GPIO_WRITE_PIN
+                    last_GPIO[btnNo] = new_GPIO[btnNo];
+                  }
+                  somewhat_changed &= ~(8192);
                 }
                 if (last_FreqCorrPPM != new_FreqCorrPPM || commandEverything)
                 {
@@ -2016,9 +2259,29 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_USB_SIDEBAND), new_USB_Sideband ? BST_CHECKED : BST_UNCHECKED);
 
+            TCHAR tempStr[256];
+
+            for (int btnNo = 0; btnNo < NUM_GPIO_BUTTONS; ++btnNo)
+            {
+              HWND hDlgItmGPIObtn = GetDlgItem(hwndDlg, IDC_GPIO_A + btnNo);
+
+              _stprintf_s(tempStr, 255, TEXT("%s"), &GPIO_txt[btnNo][0]);
+              Edit_SetText(hDlgItmGPIObtn, tempStr);
+
+              if (GPIO_en[btnNo])
+              {
+                EnableWindow(hDlgItmGPIObtn, TRUE);
+                Button_SetCheck(hDlgItmGPIObtn, new_GPIO[btnNo] ? BST_CHECKED : BST_UNCHECKED);
+              }
+              else
+              {
+                EnableWindow(hDlgItmGPIObtn, FALSE);
+                Button_SetCheck(hDlgItmGPIObtn, BST_UNCHECKED);
+              }
+            }
+
             SendMessage(GetDlgItem(hwndDlg,IDC_PPM_S), UDM_SETRANGE  , (WPARAM)TRUE, (LPARAM)MAX_PPM | (MIN_PPM << 16));
 
-            TCHAR tempStr[255];
             _stprintf_s(tempStr, 255, TEXT("%d"), new_FreqCorrPPM);
             Edit_SetText(GetDlgItem(hwndDlg,IDC_PPM), tempStr );
             //rtlsdr_set_freq_correction(dev, new_FreqCorrPPM);
@@ -2130,6 +2393,23 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
                     return TRUE;
                 }
+            case IDC_GPIO_A:
+            case IDC_GPIO_B:
+            case IDC_GPIO_C:
+            case IDC_GPIO_D:
+            case IDC_GPIO_E:
+                {
+                  const int btnNo = GET_WM_COMMAND_ID(wParam, lParam) - IDC_GPIO_A;
+                  HWND hDlgItmGPIObtn = GetDlgItem(hwndDlg, IDC_GPIO_A + btnNo);
+                  if (GPIO_en[btnNo])
+                  {
+                    new_GPIO[btnNo] = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
+                    somewhat_changed |= 8192;
+                  }
+                  EnableWindow(hDlgItmGPIObtn, GPIO_en[btnNo] ? TRUE : FALSE);
+                  return TRUE;
+                }
+
             case IDC_TUNER_RF_AGC:
                 {
                     HWND hRFGain = GetDlgItem(hwndDlg, IDC_RF_GAIN_SLIDER);
