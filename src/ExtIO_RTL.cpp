@@ -108,9 +108,10 @@ const int r820_bws[] =
 //{ 0, 350, 450, 550, 700, 900, 1200, 1450, 1550, 1600, 1700, 1800, 1900, 1950, 2050, 2080, 2180, 2280, 2330, 2430, 6000, 7000, 8000 };
 //{ 0, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
 //{ 0, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601, 700, 701, 800, 801, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 6000, 7000, 8000 };
-{ 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1300, 1500, 1600, 1750, 1950, 6000 /*, 7000, 8000 */ };
 //{ 0, 201, 202, 290, 301, 302, 375, 401, 402, 420, 470, 501, 502, 600, 601, 602, 701, 702, 801, 802, 860, 901, 950, 1001, 1100, 1101, 1201, 1300, 1301, 1503, 1600, 1753, 1953, 6000, 7000, 8000 };
 //{ 0, 202, 290, 302, 375, 420, 470, 502, 600, 602, 701, 702, 801, 802, 860, 901, 950, 1001, 1100, 1101, 1201, 1300, 1301, 1503, 1600, 1753, 1953, 6000, 7000, 8000 };
+//{ 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1300, 1500, 1600, 1750, 1950, 6000 /*, 7000, 8000 */ };
+{ 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1200, 1300, 1500, 1600, 1750, 1800, 1950, 2200, 3000, 5000 };
 
 struct tuner_gain_t
 {
@@ -574,6 +575,15 @@ long LIBRTL_API __stdcall SetHWLO(long freq)
 	somewhat_changed |= 1;
 	return 0;
 }
+
+extern "C"
+int64_t LIBRTL_API __stdcall SetHWLO64(int64_t freq)
+{
+  new_LO_freq = freq; // +new_BandCenter_LO_Delta;
+  somewhat_changed |= 1;
+  return 0;
+}
+
 
 static FILE * tuneFile = NULL;
 
@@ -1665,7 +1675,14 @@ void ThreadProc(void *p)
                 }
                 if (last_LO_freq != new_LO_freq || (somewhat_changed & 1) || commandEverything)
                 {
-                    if (!transmitTcpCmd(conn, 0x01, (uint32_t)(new_LO_freq /* - new_BandCenter_LO_Delta */)))
+                    uint64_t f64 = (uint64_t)new_LO_freq;
+                    uint32_t fhi = (uint32_t)( (f64 >> 32) & 0xffffffff );
+                    uint32_t flo = (uint32_t)( f64 & 0xffffffff );
+                    if (fhi == 0xffffffff)  /* compiler bug - with sign at >> 32 ? */
+                        fhi = 0;
+                    if (!transmitTcpCmd(conn, 0x56, fhi))  /* SET_FREQ_HI32 */
+                        break;
+                    if (!transmitTcpCmd(conn, 0x01, flo))   /* SET_FREQUENCY */
                         break;
                     last_LO_freq = new_LO_freq;
                     somewhat_changed &= ~(1);

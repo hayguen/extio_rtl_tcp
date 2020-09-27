@@ -9,6 +9,7 @@ EXPORTS
     OpenHW
     SetCallback
     SetHWLO
+    SetHWLO64
     ShowGUI
     HideGUI
     SwitchGUI
