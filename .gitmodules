@@ -1,3 +1,6 @@
 [submodule "clsocket"]
 	path = clsocket
 	url = https://github.com/procitec/clsocket.git
+[submodule "tomlplusplus"]
+	path = tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git

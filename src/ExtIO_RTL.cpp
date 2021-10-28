@@ -47,6 +47,8 @@
 
 #include "LC_ExtIO_Types.h"
 
+#include <toml++/toml.h>
+#include <fstream>
 
 #ifdef _MSC_VER
 	#pragma warning(disable : 4996)
@@ -413,6 +415,89 @@ static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
 static HWND h_dialog=NULL;
 
 
+static void print_toml_tables(int level, toml::table& tbl, std::ofstream& info_out)
+{
+    //info_out << "print_toml_tables(level " << level << ")\n";
+    for (auto const& [key, val] : tbl)
+    {
+        info_out << "level " << level << "  key: '" << key << "'";
+        if (val.is_table())
+        {
+            info_out << "\n";
+            print_toml_tables(level + 1, *(val.as_table()), info_out);
+        }
+        else if (val.is_boolean())
+        {
+            info_out << "  bool: " << val.as_boolean()->get() << "\n";
+        }
+        else if (val.is_floating_point())
+        {
+            info_out << "  float: " << val.as_floating_point()->get() << "\n";
+        }
+        else
+        {
+            info_out << "  some other type\n";
+        }
+    }
+}
+
+
+static void test_toml_config()
+{
+    // GetUserProfileDirectoryA() + "rtl_tcp_extio.cfg"
+    const char* fn = "rtl_tcp_extio.cfg";
+    std::ofstream parsed_infos;
+    parsed_infos.open("parsed_infos.txt");
+
+    FILE* f = fopen(fn, "r");
+    if (!f)
+    {
+        // no config file => write one
+        auto tbl = toml::table{ {
+            { "bands", toml::table{{
+                { "1", toml::table{{
+                    { "freq_from", 0.0 },
+                    { "freq_to", 24.5e6 },
+                    { "direct_sampling", true },
+                    { "bias_tee", false },
+                    { "tuner_rf_agc", false },
+                    { "tuner_rf_gain", 207 },
+                }} },
+                { "2", toml::table{{
+                    { "freq_from", 24.5e6 },
+                    { "freq_to", 108.0e6 },
+                    { "direct_sampling", false },
+                    { "bias_tee", false },
+                    { "tuner_rf_agc", true },
+                }} },
+            }}}
+        } };
+
+        std::ofstream config_file;
+        config_file.open(fn);
+        if (config_file.is_open())
+        {
+            config_file << tbl << "\n";
+            config_file.close();
+            parsed_infos << "wrote fresh " << fn << "\n";
+        }
+    }
+
+    // now file exists
+    toml::table tbl;
+    try
+    {
+        tbl = toml::parse_file(fn);
+        print_toml_tables(0, tbl, parsed_infos);
+    }
+    catch (const toml::parse_error& err)
+    {
+        parsed_infos << "Parsing failed : \n" << err << "\n";
+    }
+    parsed_infos.close();
+}
+
+
 static bool transmitTcpCmd(CActiveSocket &conn, uint8_t cmdId, uint32_t value)
 {
 	rtl_tcp_cmd.ac[3] = cmdId;
@@ -534,6 +619,8 @@ bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCM16");
 	else if (exthwUSBdataU8 == extHWtype)
 		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCMU8");
+
+    test_toml_config();
 
 	type = extHWtype;
 
