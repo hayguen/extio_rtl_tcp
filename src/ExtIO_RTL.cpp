@@ -120,7 +120,7 @@ struct tuner_gain_t
 };
 
 
-static tuner_gain_t tuner_rf_gains[]
+static tuner_gain_t tuner_rf_gains[] =
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { e4k_gains, sizeof(e4k_gains) / sizeof(e4k_gains[0]) }
@@ -131,7 +131,7 @@ static tuner_gain_t tuner_rf_gains[]
 , { 0, 0 }	// R828D
 };
 
-static tuner_gain_t tuner_if_gains[]
+static tuner_gain_t tuner_if_gains[] =
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { 0, 0 }  // E4000
@@ -148,7 +148,7 @@ struct tuner_bw_t
 	const int * bw;	// bw in kHz: bw in Hz = bw[] * 1000
 	const int num;
 }
-tuner_bws[]
+tuner_bws[] =
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { e4k_bws, sizeof(e4k_bws) / sizeof(e4k_bws[0]) }

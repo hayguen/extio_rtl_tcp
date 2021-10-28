@@ -1,0 +1,3 @@
+[submodule "clsocket"]
+	path = clsocket
+	url = https://github.com/procitec/clsocket.git

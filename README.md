@@ -1,11 +1,22 @@
 # extio_rtl_tcp
 ExtIO plugin for Winrad/HDSDR connecting to librtlsdr's rtl_tcp
 
-Compilation with Microsoft Visual Studio Express 2013 for Desktop (C++).
+Compilation with Microsoft Visual Studio Community 2019 (Desktop, C++),
+but requiring platform toolset: Visual Studio 2017 - Windows XP (v141_xp)
 
-You need to checkout https://github.com/hayguen/clsocket in parallel to extio_rtl_tcp:
-  https://github.com/hayguen/clsocket.git
+Clone with submodules to automatically retrieve CLsocket from https://github.com/procitec/clsocket
 
-cause the files are directly referenced from the ExtIO project.
+```
+git clone --recursive https://github.com/hayguen/extio_rtl_tcp.git
+```
+
+Having missed the `--recursive` option, you can fetch clsocket later with:
+
+```
+git submodule update --init
+```
+
+
+The CLsocket files are directly referenced from the ExtIO Visual Studio project.
 
 Precompiled DLL is available here: https://github.com/hayguen/extio_rtl_tcp/releases
