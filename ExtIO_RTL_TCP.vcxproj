@@ -78,7 +78,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_WINDLL;WIN32;CLSOCKET_STATIC_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)\clsocket\src;$(SolutionDir)\tomlplusplus\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\clsocket\src;$(SolutionDir)\tomlplusplus\include;$(SolutionDir)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -101,7 +101,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>MaxSpeed</Optimization>
-      <AdditionalIncludeDirectories>$(SolutionDir)\clsocket\src;$(SolutionDir)\tomlplusplus\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\clsocket\src;$(SolutionDir)\tomlplusplus\include;$(SolutionDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WINVER=0x0501;_WIN32;rtlsdr_STATIC;_WINDLL;WIN32;LIBRTL_EXPORTS;CLSOCKET_STATIC_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -139,6 +139,8 @@
     <ClInclude Include="$(SolutionDir)\clsocket\src\PassiveSocket.h" />
     <ClInclude Include="$(SolutionDir)\clsocket\src\SimpleSocket.h" />
     <ClInclude Include="$(SolutionDir)\clsocket\src\StatTimer.h" />
+    <ClInclude Include="librtlsdr\include\rtl_tcp.h" />
+    <ClInclude Include="src\config_file.h" />
     <ClInclude Include="src\ExtIO_RTL.h" />
     <ClInclude Include="src\LC_ExtIO_Types.h" />
     <ClInclude Include="src\resource.h" />
@@ -150,6 +152,7 @@
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)\clsocket\src\PassiveSocket.cpp" />
     <ClCompile Include="$(SolutionDir)\clsocket\src\SimpleSocket.cpp" />
+    <ClCompile Include="src\config_file.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\ExtIO_RTL.cpp" />
   </ItemGroup>

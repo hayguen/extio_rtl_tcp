@@ -46,9 +46,9 @@
 #include "ExtIO_RTL.h"
 
 #include "LC_ExtIO_Types.h"
+#include "librtlsdr/include/rtl_tcp.h"      // enum values for the commands
 
-#include <toml++/toml.h>
-#include <fstream>
+#include "config_file.h"
 
 #ifdef _MSC_VER
 	#pragma warning(disable : 4996)
@@ -415,89 +415,6 @@ static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
 static HWND h_dialog=NULL;
 
 
-static void print_toml_tables(int level, toml::table& tbl, std::ofstream& info_out)
-{
-    //info_out << "print_toml_tables(level " << level << ")\n";
-    for (auto const& [key, val] : tbl)
-    {
-        info_out << "level " << level << "  key: '" << key << "'";
-        if (val.is_table())
-        {
-            info_out << "\n";
-            print_toml_tables(level + 1, *(val.as_table()), info_out);
-        }
-        else if (val.is_boolean())
-        {
-            info_out << "  bool: " << val.as_boolean()->get() << "\n";
-        }
-        else if (val.is_floating_point())
-        {
-            info_out << "  float: " << val.as_floating_point()->get() << "\n";
-        }
-        else
-        {
-            info_out << "  some other type\n";
-        }
-    }
-}
-
-
-static void test_toml_config()
-{
-    // GetUserProfileDirectoryA() + "rtl_tcp_extio.cfg"
-    const char* fn = "rtl_tcp_extio.cfg";
-    std::ofstream parsed_infos;
-    parsed_infos.open("parsed_infos.txt");
-
-    FILE* f = fopen(fn, "r");
-    if (!f)
-    {
-        // no config file => write one
-        auto tbl = toml::table{ {
-            { "bands", toml::table{{
-                { "1", toml::table{{
-                    { "freq_from", 0.0 },
-                    { "freq_to", 24.5e6 },
-                    { "direct_sampling", true },
-                    { "bias_tee", false },
-                    { "tuner_rf_agc", false },
-                    { "tuner_rf_gain", 207 },
-                }} },
-                { "2", toml::table{{
-                    { "freq_from", 24.5e6 },
-                    { "freq_to", 108.0e6 },
-                    { "direct_sampling", false },
-                    { "bias_tee", false },
-                    { "tuner_rf_agc", true },
-                }} },
-            }}}
-        } };
-
-        std::ofstream config_file;
-        config_file.open(fn);
-        if (config_file.is_open())
-        {
-            config_file << tbl << "\n";
-            config_file.close();
-            parsed_infos << "wrote fresh " << fn << "\n";
-        }
-    }
-
-    // now file exists
-    toml::table tbl;
-    try
-    {
-        tbl = toml::parse_file(fn);
-        print_toml_tables(0, tbl, parsed_infos);
-    }
-    catch (const toml::parse_error& err)
-    {
-        parsed_infos << "Parsing failed : \n" << err << "\n";
-    }
-    parsed_infos.close();
-}
-
-
 static bool transmitTcpCmd(CActiveSocket &conn, uint8_t cmdId, uint32_t value)
 {
 	rtl_tcp_cmd.ac[3] = cmdId;
@@ -579,6 +496,8 @@ static int nearestGainIdx(int gain, const int * gains, const int n_gains)
 extern "C"
 bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 {
+    init_toml_config();     // process as early as possible, but that depends on SDR software
+
 	strcpy_s( connected_device.vendor, 256, "Realtek" );
 	strcpy_s( connected_device.product,15, "RTL2832" );
 	strcpy_s( connected_device.serial, 256, "NA" );
@@ -619,8 +538,6 @@ bool  LIBRTL_API __stdcall InitHW(char *name, char *model, int& type)
 		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCM16");
 	else if (exthwUSBdataU8 == extHWtype)
 		SDRLOG(extHw_MSG_DEBUG, "InitHW() with sample type PCMU8");
-
-    test_toml_config();
 
 	type = extHWtype;
 
@@ -1213,6 +1130,8 @@ void  LIBRTL_API __stdcall ExtIoSetSetting( int idx, const char * value )
   static bool bCompatibleSettings = true;  // initial assumption
   int tempInt;
 
+  init_toml_config();     // process as early as possible, but that depends on SDR software
+
   // in case settings are not compatible: keep internal defaults
   if ( !bCompatibleSettings )
     return;
@@ -1463,6 +1382,8 @@ void LIBRTL_API  __stdcall VersionInfo(const char * progname, int ver_major, int
 extern "C"
 void LIBRTL_API  __stdcall ExtIoSDRInfo( int extSDRInfo, int additionalValue, void * additionalPtr )
 {
+    init_toml_config();     // process as early as possible, but that depends on SDR software
+
 	if (extSDRInfo == extSDR_supports_PCMU8)
 	{
 		SDRsupportsSamplePCMU8 = true;
@@ -1702,6 +1623,66 @@ void ThreadProc(void *p)
         {
             if (ThreadStreamToSDR && (somewhat_changed || commandEverything))
             {
+                if (last_LO_freq != new_LO_freq)
+                {
+                    const BandAction* new_band = update_band_action(double(new_LO_freq));
+                    if (new_band)
+                    {
+                        // we are now moving into a new band with some defined action(s)
+                        // @todo: process here .. by setting the variables new_xxx
+                        const BandAction& ba = *new_band;   // have a shorter alias
+                        if (ba.sampling_mode)
+                        {
+                            if (ba.sampling_mode.value() == 'I')
+                                new_DirectSampling = 1;
+                            else if (ba.sampling_mode.value() == 'Q')
+                                new_DirectSampling = 2;
+                            else if (ba.sampling_mode.value() == 'C')
+                                new_DirectSampling = 0;
+                        }
+
+                        if (ba.rtl_digital_agc)
+                            new_RTLAGC = ba.rtl_digital_agc.value() ? 1 : 0;
+
+                        if (ba.tuner_rf_agc)
+                            new_TunerRF_AGC = ba.tuner_rf_agc.value() ? 1 : 0;
+                        if (ba.tuner_rf_gain_db)
+                        {
+                            new_TunerRF_AGC = 0;    // also deactivate AGC
+                            new_rf_gain = int(ba.tuner_rf_gain_db.value() * 10.0);
+                        }
+
+                        if (ba.tuner_if_agc)
+                            new_TunerIF_AGC = ba.tuner_if_agc.value() ? 1 : 0;
+                        if (ba.tuner_if_gain_db)
+                        {
+                            new_TunerIF_AGC = 0;    // also deactivate AGC
+                            new_if_gain_idx = int(ba.tuner_if_gain_db.value() * 10.0);
+                        }
+
+                        if (ba.tuning_sideband)
+                        {
+                            if (ba.tuning_sideband.value() == 'L')
+                                new_USB_Sideband = 0;
+                            else if (ba.tuning_sideband.value() == 'U')
+                                new_USB_Sideband = 1;
+                        }
+
+                        if (ba.gpio_button0)
+                            new_GPIO[0] = ba.gpio_button0.value() ? 1 : 0;
+                        if (ba.gpio_button1)
+                            new_GPIO[1] = ba.gpio_button0.value() ? 1 : 0;
+                        if (ba.gpio_button2)
+                            new_GPIO[2] = ba.gpio_button0.value() ? 1 : 0;
+                        if (ba.gpio_button3)
+                            new_GPIO[3] = ba.gpio_button0.value() ? 1 : 0;
+                        if (ba.gpio_button4)
+                            new_GPIO[4] = ba.gpio_button0.value() ? 1 : 0;
+
+                        // @todo: add remaining ones
+                    }
+                }
+
                 if (last_DirectSampling != new_DirectSampling || commandEverything)
                 {
                     if (!transmitTcpCmd(conn, 0x09, new_DirectSampling))
