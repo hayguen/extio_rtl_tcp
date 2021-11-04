@@ -52,6 +52,14 @@ jobs:
     #   # run: Compress-Archive -DestinationPath EXTIO.ZIP -LiteralPath ${{runner.workspace}}/build/ExtIO_sddc/Release/ExtIO_SDDC.dll,${{runner.workspace}}/build/unittest/libfftw3f-3.dll,README.md
     #   run: Compress-Archive -DestinationPath extio_rtl_tcp_src.zip -LiteralPath ${{runner.workspace}},README.md
 
+
+    - name: Build
+      working-directory: ${{runner.workspace}}
+      shell: bash
+      # Execute the build.  You can specify a specific target with "--target <NAME>"
+      run: find . >extio_rtl_tcp/listing.txt
+
+
     - name: package and upload
       uses: actions/upload-artifact@v2
       with:
