@@ -29,22 +29,22 @@ jobs:
     - name: Checkout submodules
       run: git submodule update --depth 1 --init --recursive
 
-    # - name: Configure CMake
-    #   # Use a bash shell so we can use the same syntax for environment variable
-    #   # access regardless of the host operating system
-    #   shell: bash
-    #   working-directory: ${{runner.workspace}}
-    #   # Note the current convention is to use the -S and -B options here to specify source
-    #   # and build directories, but this is only available with CMake 3.13 and higher.
-    #   # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
-    #   # @todo:  ${{runner.workspace}}/build
-    #   run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -G "Visual Studio 16 2019" -A Win32
+    - name: Configure CMake
+      # Use a bash shell so we can use the same syntax for environment variable
+      # access regardless of the host operating system
+      shell: bash
+      working-directory: ${{runner.workspace}}
+      # Note the current convention is to use the -S and -B options here to specify source
+      # and build directories, but this is only available with CMake 3.13 and higher.
+      # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
+      #   looks v141_xp Toolset requires VS 2019!
+      run: cmake -G "Visual Studio 16 2019" -T v141_xp -A Win32 -S extio_rtl_tcp -B build
 
-    # - name: Build
-    #   working-directory: ${{runner.workspace}}
-    #   shell: bash
-    #   # Execute the build.  You can specify a specific target with "--target <NAME>"
-    #   run: cmake --build . --config $BUILD_TYPE
+    - name: Build
+      working-directory: ${{runner.workspace}}
+      shell: bash
+      run: cmake --build build --config $BUILD_TYPE
+
 
     # - name: Create Package
     #   shell: powershell
@@ -53,10 +53,9 @@ jobs:
     #   run: Compress-Archive -DestinationPath extio_rtl_tcp_src.zip -LiteralPath ${{runner.workspace}},README.md
 
 
-    - name: Build
+    - name: Dir Listing
       working-directory: ${{runner.workspace}}
       shell: bash
-      # Execute the build.  You can specify a specific target with "--target <NAME>"
       run: find . >extio_rtl_tcp/listing.txt
 
 
@@ -66,5 +65,5 @@ jobs:
         name: extio_rtl_tcp_src
         path: |
             ${{runner.workspace}}/extio_rtl_tcp
-
+            ${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll
 

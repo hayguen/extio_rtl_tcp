@@ -27,7 +27,7 @@
 
 #define WITH_AGCS		0
 
-#define SETTINGS_IDENTIFIER "RTL_TCP_2020.1-2"
+#define SETTINGS_IDENTIFIER "RTL_TCP_2021.1-1"
 
 
 #include <stdint.h>
@@ -46,7 +46,7 @@
 #include "ExtIO_RTL.h"
 
 #include "LC_ExtIO_Types.h"
-#include "librtlsdr/include/rtl_tcp.h"      // enum values for the commands
+#include "rtl_tcp.h"      // enum values for the commands
 
 #include "config_file.h"
 
