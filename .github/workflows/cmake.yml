@@ -19,7 +19,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    # - uses: actions/checkout@v2
 
     - name: Checkout repository
       uses: actions/checkout@v2
@@ -30,14 +29,9 @@ jobs:
       run: git submodule update --depth 1 --init --recursive
 
     - name: Configure CMake
-      # Use a bash shell so we can use the same syntax for environment variable
-      # access regardless of the host operating system
-      shell: bash
       working-directory: ${{runner.workspace}}
-      # Note the current convention is to use the -S and -B options here to specify source
-      # and build directories, but this is only available with CMake 3.13 and higher.
-      # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
-      #   looks v141_xp Toolset requires VS 2019!
+      shell: bash
+      # looks v141_xp Toolset requires VS 2019!
       run: cmake -G "Visual Studio 16 2019" -T v141_xp -A Win32 -S extio_rtl_tcp -B build
 
     - name: Build
@@ -45,25 +39,25 @@ jobs:
       shell: bash
       run: cmake --build build --config $BUILD_TYPE
 
+    #- name: Dir Listing
+    #  working-directory: ${{runner.workspace}}
+    #  shell: bash
+    #  run: find . >src_listing.txt
 
-    # - name: Create Package
-    #   shell: powershell
-    #   working-directory: ${{runner.workspace}}
-    #   # run: Compress-Archive -DestinationPath EXTIO.ZIP -LiteralPath ${{runner.workspace}}/build/ExtIO_sddc/Release/ExtIO_SDDC.dll,${{runner.workspace}}/build/unittest/libfftw3f-3.dll,README.md
-    #   run: Compress-Archive -DestinationPath extio_rtl_tcp_src.zip -LiteralPath ${{runner.workspace}},README.md
-
-
-    - name: Dir Listing
+    - name: Collect files to distribute
       working-directory: ${{runner.workspace}}
       shell: bash
-      run: find . >extio_rtl_tcp/listing.txt
-
+      run: |
+        cp "${{runner.workspace}}/extio_rtl_tcp/README.md" ./
+        cp "${{runner.workspace}}/extio_rtl_tcp/LICENSE" ./
+        cp "${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll" ./
 
     - name: package and upload
       uses: actions/upload-artifact@v2
       with:
-        name: extio_rtl_tcp_src
+        name: extio_rtl_tcp
         path: |
-            ${{runner.workspace}}/extio_rtl_tcp
-            ${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll
+            ${{runner.workspace}}/ExtIO_RTL_TCP.dll
+            ${{runner.workspace}}/README.md
+            ${{runner.workspace}}/LICENSE
 
