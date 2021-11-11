@@ -10,6 +10,8 @@ struct BandAction
 {
     // mandatory
     std::string id;
+    std::optional<std::string> name;
+
     double  freq_from;      // frequency in Hz - defining the band
     double  freq_to;        // frequency in Hz - defining the band
 
@@ -29,7 +31,7 @@ struct BandAction
 
     std::optional<bool>     rtl_digital_agc;
 
-    std::optional<bool>     gpio_button0;
+    std::optional<bool>     gpio_button0;   // == bias_tee
     std::optional<bool>     gpio_button1;
     std::optional<bool>     gpio_button2;
     std::optional<bool>     gpio_button3;

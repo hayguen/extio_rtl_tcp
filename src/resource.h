@@ -30,3 +30,4 @@
 #define IDC_GPIO_C                              1032
 #define IDC_GPIO_D                              1033
 #define IDC_GPIO_E                              1034
+#define IDC_BAND_NAME                           1035

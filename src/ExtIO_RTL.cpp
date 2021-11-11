@@ -62,6 +62,11 @@
 #endif
 
 
+extern "C" int  LIBRTL_API __stdcall SetAttenuator(int atten_idx);
+extern "C" int  LIBRTL_API __stdcall ExtIoSetMGC(int mgc_idx);
+
+
+
 static int buffer_sizes[] = { //in kBytes
 	1, 2, 4, 8, 16, 32, 64, 128, 256
 };
@@ -304,6 +309,8 @@ static volatile int somewhat_changed = 0;
     // 2048 == tuner band center
     // 4096 == tuner if agc / if gain
     // 8192 == gpio changed
+    // 16384 == band_changed
+    // 32768 == command everything
 
 static volatile int64_t last_LO_freq = 100000000;
 static volatile int64_t new_LO_freq = 100000000;
@@ -572,21 +579,154 @@ bool  LIBRTL_API __stdcall OpenHW()
 	return TRUE;
 }
 
+
+static TCHAR band_disp_text[255] = { 0 };
+
+
+static int _setHwLO_check_bands(int64_t freq)
+{
+    if (new_LO_freq == freq || !h_dialog)
+        return 0;
+
+    const BandAction* new_band = update_band_action(double(freq));
+    if (!new_band)
+        return 0;
+
+    // we are now moving into a new band with some defined action(s)
+    const BandAction& ba = *new_band;   // have a shorter alias
+    bool post_msg = false;      // update all fields in GUI dialog?
+    int changed_flags = 0;
+
+    if (ba.name.has_value())
+        _stprintf_s(band_disp_text, 255, TEXT("Band: %s"), ba.name.value().c_str());
+    else
+        _stprintf_s(band_disp_text, 255, TEXT("Band: %s"), ba.id.c_str());
+    post_msg = true;  // post anyway - to change displayed band name
+
+    if (ba.sampling_mode)
+    {
+        if (ba.sampling_mode.value() == 'I')
+            new_DirectSampling = 1;
+        else if (ba.sampling_mode.value() == 'Q')
+            new_DirectSampling = 2;
+        else if (ba.sampling_mode.value() == 'C')
+            new_DirectSampling = 0;
+        changed_flags |= 32; // direct sampling mode;
+    }
+
+    if (ba.rtl_digital_agc)
+    {
+        new_RTLAGC = ba.rtl_digital_agc.value() ? 1 : 0;
+        changed_flags |= 16; // rtl agc
+    }
+
+    if (ba.tuner_rf_agc)
+    {
+        new_TunerRF_AGC = ba.tuner_rf_agc.value() ? 1 : 0;
+        changed_flags |= 8;
+    }
+
+    if (ba.tuner_if_agc)
+    {
+        new_TunerIF_AGC = ba.tuner_if_agc.value() ? 1 : 0;
+        changed_flags |= 4096;
+    }
+
+    if (ba.tuning_sideband)
+    {
+        if (ba.tuning_sideband.value() == 'L')
+            new_USB_Sideband = 0;
+        else if (ba.tuning_sideband.value() == 'U')
+            new_USB_Sideband = 1;
+        changed_flags |= 1024;
+    }
+
+    if (ba.gpio_button0)
+        new_GPIO[0] = ba.gpio_button0.value() ? 1 : 0;
+    if (ba.gpio_button1)
+        new_GPIO[1] = ba.gpio_button0.value() ? 1 : 0;
+    if (ba.gpio_button2)
+        new_GPIO[2] = ba.gpio_button0.value() ? 1 : 0;
+    if (ba.gpio_button3)
+        new_GPIO[3] = ba.gpio_button0.value() ? 1 : 0;
+    if (ba.gpio_button4)
+        new_GPIO[4] = ba.gpio_button0.value() ? 1 : 0;
+    if (ba.gpio_button0 || ba.gpio_button1 || ba.gpio_button2 || ba.gpio_button3 || ba.gpio_button4)
+        changed_flags |= 1024;
+
+    if (ba.tuner_rf_gain_db)
+    {
+        new_TunerRF_AGC = 0;    // also deactivate AGC
+        const int rf_gain_tenth_db = int(ba.tuner_rf_gain_db.value() * 10.0);
+        if (GotTunerInfo && tunerNo < (sizeof(tuner_rf_gains) / sizeof(tuner_rf_gains[0])))
+        {
+            int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_rf_gains[tunerNo].gain, tuner_rf_gains[tunerNo].num);
+            if (gainIdx >= 0 && gainIdx < tuner_rf_gains[tunerNo].num)
+                new_rf_gain = tuner_rf_gains[tunerNo].gain[gainIdx];
+        }
+        changed_flags |= (8 | 4);
+    }
+    else if (ba.tuner_rf_gain_db && GotTunerInfo && tunerNo < (sizeof(tuner_rf_gains) / sizeof(tuner_rf_gains[0])))
+    {
+        new_TunerRF_AGC = 0;    // also deactivate AGC
+        const int rf_gain_tenth_db = int(ba.tuner_rf_gain_db.value() * 10.0);
+        int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_rf_gains[tunerNo].gain, tuner_rf_gains[tunerNo].num);
+        SetAttenuator(gainIdx);
+    }
+
+    if (ba.tuner_if_gain_db)
+    {
+        new_TunerIF_AGC = 0;    // also deactivate AGC
+        int if_gain_tenth_db = int(ba.tuner_if_gain_db.value() * 10.0);
+        if (GotTunerInfo && tunerNo < (sizeof(tuner_if_gains) / sizeof(tuner_if_gains[0])))
+        {
+            new_if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_if_gains[tunerNo].gain, tuner_if_gains[tunerNo].num);
+            if (new_if_gain_idx >= 0 && new_if_gain_idx < tuner_if_gains[tunerNo].num)
+                new_if_gain = tuner_if_gains[tunerNo].gain[new_if_gain_idx];
+
+        }
+        changed_flags |= 4096;
+    }
+    else if (ba.tuner_if_gain_db && GotTunerInfo && tunerNo < (sizeof(tuner_if_gains) / sizeof(tuner_if_gains[0])))
+    {
+        new_TunerIF_AGC = 0;    // also deactivate AGC
+        const int if_gain_tenth_db = int(ba.tuner_if_gain_db.value() * 10.0);
+
+        int if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_if_gains[tunerNo].gain, tuner_if_gains[tunerNo].num);
+        ExtIoSetMGC(if_gain_idx);
+    }
+
+
+    if (post_msg || changed_flags)  // update GUI fields on changes
+        PostMessage(h_dialog, WM_USER + 42, (WPARAM)0, (LPARAM)0);
+
+    if (changed_flags)
+        changed_flags |= 32768; // cmd_everything ! - if there's anything to command
+
+    return changed_flags;
+}
+
+
 extern "C"
 long LIBRTL_API __stdcall SetHWLO(long freq)
 {
-  new_LO_freq = freq; // +new_BandCenter_LO_Delta;
-	somewhat_changed |= 1;
-	return 0;
+    const int change_flags = _setHwLO_check_bands(freq);
+    new_LO_freq = freq; // +new_BandCenter_LO_Delta;
+    somewhat_changed |= (change_flags | 1);
+    return 0;
 }
+
 
 extern "C"
 int64_t LIBRTL_API __stdcall SetHWLO64(int64_t freq)
 {
+  const int change_flags = _setHwLO_check_bands(freq);
   new_LO_freq = freq; // +new_BandCenter_LO_Delta;
-  somewhat_changed |= 1;
+  somewhat_changed |= (change_flags | 1);
   return 0;
 }
+
+
 
 
 static FILE * tuneFile = NULL;
@@ -1623,64 +1763,10 @@ void ThreadProc(void *p)
         {
             if (ThreadStreamToSDR && (somewhat_changed || commandEverything))
             {
-                if (last_LO_freq != new_LO_freq)
+                if (somewhat_changed & 32768)
                 {
-                    const BandAction* new_band = update_band_action(double(new_LO_freq));
-                    if (new_band)
-                    {
-                        // we are now moving into a new band with some defined action(s)
-                        // @todo: process here .. by setting the variables new_xxx
-                        const BandAction& ba = *new_band;   // have a shorter alias
-                        if (ba.sampling_mode)
-                        {
-                            if (ba.sampling_mode.value() == 'I')
-                                new_DirectSampling = 1;
-                            else if (ba.sampling_mode.value() == 'Q')
-                                new_DirectSampling = 2;
-                            else if (ba.sampling_mode.value() == 'C')
-                                new_DirectSampling = 0;
-                        }
-
-                        if (ba.rtl_digital_agc)
-                            new_RTLAGC = ba.rtl_digital_agc.value() ? 1 : 0;
-
-                        if (ba.tuner_rf_agc)
-                            new_TunerRF_AGC = ba.tuner_rf_agc.value() ? 1 : 0;
-                        if (ba.tuner_rf_gain_db)
-                        {
-                            new_TunerRF_AGC = 0;    // also deactivate AGC
-                            new_rf_gain = int(ba.tuner_rf_gain_db.value() * 10.0);
-                        }
-
-                        if (ba.tuner_if_agc)
-                            new_TunerIF_AGC = ba.tuner_if_agc.value() ? 1 : 0;
-                        if (ba.tuner_if_gain_db)
-                        {
-                            new_TunerIF_AGC = 0;    // also deactivate AGC
-                            new_if_gain_idx = int(ba.tuner_if_gain_db.value() * 10.0);
-                        }
-
-                        if (ba.tuning_sideband)
-                        {
-                            if (ba.tuning_sideband.value() == 'L')
-                                new_USB_Sideband = 0;
-                            else if (ba.tuning_sideband.value() == 'U')
-                                new_USB_Sideband = 1;
-                        }
-
-                        if (ba.gpio_button0)
-                            new_GPIO[0] = ba.gpio_button0.value() ? 1 : 0;
-                        if (ba.gpio_button1)
-                            new_GPIO[1] = ba.gpio_button0.value() ? 1 : 0;
-                        if (ba.gpio_button2)
-                            new_GPIO[2] = ba.gpio_button0.value() ? 1 : 0;
-                        if (ba.gpio_button3)
-                            new_GPIO[3] = ba.gpio_button0.value() ? 1 : 0;
-                        if (ba.gpio_button4)
-                            new_GPIO[4] = ba.gpio_button0.value() ? 1 : 0;
-
-                        // @todo: add remaining ones
-                    }
+                    commandEverything = true;
+                    somewhat_changed &= ~(32768);
                 }
 
                 if (last_DirectSampling != new_DirectSampling || commandEverything)
@@ -2318,10 +2404,15 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
     switch (uMsg)
     {
+        case (WM_USER + 42):
         case WM_INITDIALOG:
         {
             HWND hDlgItmOffset = GetDlgItem(hwndDlg, IDC_OFFSET);
             HWND hDlgItmUsbSB = GetDlgItem(hwndDlg, IDC_USB_SIDEBAND);
+            HWND hDlgItmBandText = GetDlgItem(hwndDlg, IDC_BAND_NAME);
+
+            if (band_disp_text[0])
+                Static_SetText(hDlgItmBandText, band_disp_text);
 
             for (int i=0; i<(sizeof(directS)/sizeof(directS[0]));i++)
                 ComboBox_AddString(GetDlgItem(hwndDlg,IDC_DIRECT),directS[i]);
@@ -2394,6 +2485,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
 
             updateTunerBWs(hwndDlg);
             updateRFTunerGains(hwndDlg);
+            updateIFTunerGains(hwndDlg);
             updateDecimations(hwndDlg);
 
             return TRUE;

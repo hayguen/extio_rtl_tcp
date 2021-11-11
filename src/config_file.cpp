@@ -19,6 +19,10 @@
 static const char* config_fn = "rtl_tcp_extio.cfg";
 
 // keys (strings) in .cfg file
+static const std::string key_enable("enable");
+static const std::string key_log("log");
+
+static const std::string key_band_name("name");
 static const std::string key_freq_from("freq_from");
 static const std::string key_freq_to("freq_to");
 static const std::string key_sampling_mode("sampling_mode");
@@ -42,7 +46,7 @@ static const std::string key_gpio_button4("gpio_button4");
 
 static std::vector<BandAction> band_actions;
 
-static const BandAction initial_band_action { "_init_", -1.0, -1.0 };
+static const BandAction initial_band_action{ "_init_", {}, -1.0, -1.0 };
 
 static const BandAction* current_band_action = &initial_band_action;
 
@@ -127,6 +131,18 @@ static void parse_band_action(const std::string &id, const toml::table& tbl, std
         if (!key.compare(key_freq_from) || !key.compare(key_freq_to))
             continue;
 
+        else if (!key.compare(key_band_name))
+        {
+            if (!val.is_string())
+            {
+                info_out << "error: '" << key << "' for band '" << id
+                    << "' is no string!\n";
+                continue;
+            }
+            const std::string val_str = val.as_string()->get();
+            ba.name = val_str;
+        }
+
         else if (!key.compare(key_sampling_mode))
         {
             if (!val.is_string())
@@ -190,6 +206,9 @@ static void parse_band_action(const std::string &id, const toml::table& tbl, std
 
         else if (is_expected_bool_type(id, key, key_rtl_digital_agc, val, info_out))
             ba.rtl_digital_agc = val.as_boolean()->get();
+
+        else if (is_expected_bool_type(id, key, key_bias_tee, val, info_out))
+            ba.gpio_button0 = val.as_boolean()->get();
 
         else if (is_expected_bool_type(id, key, key_gpio_button0, val, info_out))
             ba.gpio_button0 = val.as_boolean()->get();
@@ -262,9 +281,12 @@ static bool write_default_config(const char *fn)
     auto tbl = toml::table{{
         { "# comment1", "info: keys starting with a '#' are interpreted as comments and ignored" },
         { "# comment2", "this file is automatically created as example/template, showing possible keys" },
-        { "# enable", "thus, set enable to 'true' to activate" },
-        { "enable", false },        // have it deactivated by default!
+        { "# enable", "thus, set enable to 'true' to activate; keep 'false' to deactivate" },
+        { "# log", "log parsing to the file 'parsed_infos.txt'" },
+        { key_enable, false },        // have it deactivated by default!
+        { key_log, false },
         { "bands", toml::table{{
+            { "# name", "optional: band name to display" },
             { "# freq_from", "mandatory: low band edge: frequency in Hz" },
             { "# freq_to", "mandatory: high band edge: frequency in Hz" },
             { "# sampling_mode", "optional: 'I', 'Q' or 'C' for complex/both lines" },
@@ -277,17 +299,15 @@ static bool write_default_config(const char *fn)
             { "# tuner_if_agc", "optional" },
             { "# tuner_if_gain_db", "optional" },
             { "# rtl_digital_agc", "optional" },
-            { "# bias_tee", "optional" },
-            { "# gpio_pin0", "optional" },
-            { "# gpio_pin1", "optional" },
-            { "# gpio_pin2", "optional" },
-            { "# gpio_pin3", "optional" },
-            { "# gpio_pin4", "optional" },
-            { "# gpio_pin5", "optional" },
-            { "# gpio_pin6", "optional" },
-            { "# gpio_pin7", "optional" },
+            { "# bias_tee", "optional: alias for 'gpio_button0'" },
+            { "# gpio_button0", "optional: equals bias_tee" },
+            { "# gpio_button1", "optional: the button state - NOT the GPIO state!" },
+            { "# gpio_button2", "optional" },
+            { "# gpio_button3", "optional" },
+            { "# gpio_button4", "optional" },
 
             { "1", toml::table{{
+                { key_band_name, "0..13 MHz (HF-DS)" },
                 { key_freq_from, 0.0 },
                 { key_freq_to, 13.0e6 },
                 { key_sampling_mode, "Q" },
@@ -296,6 +316,7 @@ static bool write_default_config(const char *fn)
                 { key_tuner_if_agc, true },
             }} },
             { "2", toml::table{{
+                { key_band_name, "13..24.5 MHz (HF-DS)" },
                 { key_freq_from, 13.0e6 },
                 { key_freq_to, 24.5e6 },
                 { key_sampling_mode, "Q" },
@@ -304,6 +325,7 @@ static bool write_default_config(const char *fn)
                 { key_tuner_if_agc, true },
             }} },
             { "3", toml::table{{
+                { key_band_name, "24.5..108 MHz" },
                 { key_freq_from, 24.5e6 },
                 { key_freq_to, 108.0e6 },
                 { key_sampling_mode, "C" },
@@ -312,6 +334,7 @@ static bool write_default_config(const char *fn)
                 { key_tuner_if_gain_db, 11.2 },
             }} },
             { "4", toml::table{{
+                { key_band_name, "108..300 MHz" },
                 { key_freq_from, 108.0e6 },
                 { key_freq_to, 300.0e6 },
                 { key_sampling_mode, "C" },
@@ -320,6 +343,7 @@ static bool write_default_config(const char *fn)
                 { key_tuner_if_gain_db, 11.2 },
             }} },
             { "5", toml::table{{
+                { key_band_name, "300..2000 MHz" },
                 { key_freq_from, 300.0e6 },
                 { key_freq_to, 2000.0e6 },
                 { key_sampling_mode, "C" },
@@ -352,25 +376,34 @@ void init_toml_config()
 
     // @todo: prepend GetUserProfileDirectoryA() + "rtl_tcp_extio.cfg" ?
     const char* fn = config_fn;
-    std::ofstream parsed_infos;
-    parsed_infos.open("parsed_infos.txt");
 
     FILE* f = fopen(fn, "r");
     if (!f)
     {
         // no config file => write one
         bool write_ok = write_default_config(fn);
-        if (write_ok)
-            parsed_infos << "wrote fresh " << fn << "\n";
-        else
-            parsed_infos << "error writing " << fn << "\n";
+        //if (!write_ok)
+        //    ;
     }
 
+    std::ofstream parsed_infos;
+
     toml::table tbl;
+    bool parse_cfg = false;
     try
     {
         tbl = toml::parse_file(fn);
-        print_toml_tables(0, tbl, parsed_infos);
+        auto it_log = tbl.find(key_log);
+        if (it_log != tbl.end() && it_log->second.is_boolean())
+            if (it_log->second.as_boolean()->get())
+                parsed_infos.open("parsed_infos.txt");
+
+        auto it_enable = tbl.find(key_enable);
+        if (it_enable != tbl.end() && it_enable->second.is_boolean())
+            parse_cfg = it_enable->second.as_boolean()->get();
+
+        if (parse_cfg)
+            print_toml_tables(0, tbl, parsed_infos);
     }
     catch (const toml::parse_error& err)
     {
