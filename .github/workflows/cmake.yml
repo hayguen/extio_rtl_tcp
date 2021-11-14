@@ -16,7 +16,8 @@ env:
 jobs:
   build-on-windows:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
-    runs-on: windows-latest
+    # windows-latest or windows-2022 fail!?
+    runs-on: windows-2019
 
     steps:
 

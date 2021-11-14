@@ -16,6 +16,10 @@ Having missed the `--recursive` option, you can fetch clsocket later with:
 git submodule update --init
 ```
 
+Check for `rtl_tcp_extio.cfg` - after having started and close HDSDR once.
+You might edit bands and band specific settings there with a text editor.
+Don't forget to `enable` the band configs, then restart HDSDR.
+
 
 The CLsocket files are directly referenced from the ExtIO Visual Studio project.
 

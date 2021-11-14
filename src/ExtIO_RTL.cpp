@@ -700,8 +700,8 @@ static int _setHwLO_check_bands(int64_t freq)
     if (post_msg || changed_flags)  // update GUI fields on changes
         PostMessage(h_dialog, WM_USER + 42, (WPARAM)0, (LPARAM)0);
 
-    if (changed_flags)
-        changed_flags |= 32768; // cmd_everything ! - if there's anything to command
+    //if (changed_flags)
+    //    changed_flags |= 32768; // cmd_everything ! - if there's anything to command
 
     return changed_flags;
 }
