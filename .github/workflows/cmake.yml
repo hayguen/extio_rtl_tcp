@@ -50,6 +50,7 @@ jobs:
       shell: bash
       run: |
         cp "${{runner.workspace}}/extio_rtl_tcp/README.md" ./
+        cp "${{runner.workspace}}/extio_rtl_tcp/README_RTL_TCP.txt" ./
         cp "${{runner.workspace}}/extio_rtl_tcp/LICENSE" ./
         cp "${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll" ./
 
@@ -60,5 +61,6 @@ jobs:
         path: |
             ${{runner.workspace}}/ExtIO_RTL_TCP.dll
             ${{runner.workspace}}/README.md
+            ${{runner.workspace}}/README_RTL_TCP.txt
             ${{runner.workspace}}/LICENSE
 

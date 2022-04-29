@@ -27,7 +27,7 @@
 
 #define WITH_AGCS		0
 
-#define SETTINGS_IDENTIFIER "RTL_TCP_2021.1-1"
+#define SETTINGS_IDENTIFIER "RTL_TCP_2022.1-1"
 
 
 #include <stdint.h>
