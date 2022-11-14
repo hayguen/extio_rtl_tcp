@@ -1,0 +1,79 @@
+
+name: Upload Release Asset
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build-on-windows:
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    # windows-latest or windows-2022 fail!?
+    runs-on: windows-2019
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 2
+
+    - name: Checkout submodules
+      run: git submodule update --depth 1 --init --recursive
+
+    - name: Configure CMake
+      working-directory: ${{runner.workspace}}
+      shell: bash
+      # looks v141_xp Toolset requires VS 2019!
+      run: cmake -G "Visual Studio 16 2019" -T v141_xp -A Win32 -S extio_rtl_tcp -B build
+
+    - name: Build
+      working-directory: ${{runner.workspace}}
+      shell: bash
+      run: cmake --build build --config $BUILD_TYPE
+
+    #- name: Dir Listing
+    #  working-directory: ${{runner.workspace}}
+    #  shell: bash
+    #  run: find . >src_listing.txt
+
+    - name: Collect files to distribute
+      working-directory: ${{runner.workspace}}
+      shell: bash
+      run: |
+        cp "${{runner.workspace}}/extio_rtl_tcp/README.md" ./
+        cp "${{runner.workspace}}/extio_rtl_tcp/README_RTL_TCP.txt" ./
+        cp "${{runner.workspace}}/extio_rtl_tcp/LICENSE" ./
+        cp "${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll" ./
+        7z a extio_rtl_tcp.zip README.md README_RTL_TCP.txt LICENSE ExtIO_RTL_TCP.dll
+        pwd
+        ls -alh
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object,
+        # which include a `upload_url`. See this blog post for more info:
+        # https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{runner.workspace}}/extio_rtl_tcp.zip
+        asset_name: extio_rtl_tcp.zip
+        asset_content_type: application/zip
