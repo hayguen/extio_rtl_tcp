@@ -27,7 +27,7 @@
 
 #define WITH_AGCS		0
 
-#define SETTINGS_IDENTIFIER "RTL_TCP_2022.1-1"
+#define SETTINGS_IDENTIFIER "RTL_TCP_2022.2-1"
 
 
 #include <stdint.h>
@@ -179,61 +179,64 @@ static sr_t samplerates[] = {
 #if 1
 	{ 225001.0, TEXT("0.225 Msps"), 225001 },				// [0]
 	{ 250000.0, TEXT("0.25 Msps"), 250000 },				// [1]
-	{ 264600.0, TEXT("0.265 Msps ( 88.2 kHz)"), 264600 },	// [2]
-	{ 288000.0, TEXT("0.288 Msps ( 96.0 kHz)"), 288000 },	// [3]
-	{ 300000.0, TEXT("0.3 Msps"), 300000 },					// [4]
+	{ 256000.0, TEXT("0.256 Msps ( 32 kHz)"), 256000 },		// [2]
+	{ 264600.0, TEXT("0.265 Msps ( 88.2 kHz)"), 264600 },	// [3]
+	{ 288000.0, TEXT("0.288 Msps ( 96.0 kHz)"), 288000 },	// [4]
+	{ 300000.0, TEXT("0.3 Msps"), 300000 },					// [5]
 #endif
 
-	{  960000.0, TEXT("0.96 kSps (192.0 kHz)"),  960000 },	// = 5 * 192 kHz		[5]
+	{  960000.0, TEXT("0.96 kSps (192.0 kHz)"),  960000 },	// = 5 * 192 kHz		[6]
 
-	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },				// [6]
+	{ 1000000.0, TEXT("1.00 Msps"),  1000000 },					// [7]
+	{ 1024000.0, TEXT("1.024 Msps ( 32 kHz)"),  1024000 },		// [8]
 
-	{ 1058400.0, TEXT("1.058 Msps (176.4 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[7]
-	{ 1152000.0, TEXT("1.152 Msps (192.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[8]
+	{ 1058400.0, TEXT("1.058 Msps (176.4 kHz)"), 1058400 },	// = 6 * 176.4 kHz		[9]
+	{ 1152000.0, TEXT("1.152 Msps (192.0 kHz)"), 1152000 },	// = 6 * 192 kHz		[10]
 
 	//{ 1200000.0, TEXT("1.20 Msps"),  1200000 },
-	{ 1234800.0, TEXT("1.234 Msps (176.4 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[9]
-	{ 1344000.0, TEXT("1.344 Msps (192.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[10]
+	{ 1234800.0, TEXT("1.234 Msps (176.4 kHz)"), 1234800 },	// = 7 * 176.4 kHz		[11]
+	{ 1344000.0, TEXT("1.344 Msps (192.0 kHz)"), 1344000 },	// = 7 * 192 kHz		[12]
 
-	{ 1411200.0, TEXT("1.411 Msps (176.4 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[11]
+	{ 1411200.0, TEXT("1.411 Msps (176.4 kHz)"), 1411200 },	// = 8 * 176.4 kHz		[13]
 
-	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },				// [12]
+	{ 1500000.0, TEXT("1.50 Msps"), 1500000 },				// [14]
 
-	{ 1536000.0, TEXT("1.536 Msps (192.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[13]
+	{ 1536000.0, TEXT("1.536 Msps (192.0 kHz)"), 1536000 },	// = 8 * 192 kHz		[15]
 
-	{ 1764000.0, TEXT("1.764 Msps (176.4 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[14]
+	{ 1764000.0, TEXT("1.764 Msps (176.4 kHz)"), 1764000 },	// = 10 * 176.4 kHz		[16]
 
 	//{ 1800000.0, TEXT("1.8 Msps"), 1800000 },
-	{ 1920000.0, TEXT("1.92 Msps (192.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[15]
+	{ 1920000.0, TEXT("1.92 Msps (192.0 kHz)"), 1920000 },	// = 10 * 192 kHz		[17]
 
-	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },				// [16]
+	{ 2000000.0, TEXT("2.00 Msps"), 2000000 },				// [18]
 
-	{ 2116800.0, TEXT("2.116 Msps (176.4 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[17]
-	{ 2304000.0, TEXT("2.304 Msps (192.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[18]
+	{ 2048000.0, TEXT("2.048 Msps ( 32.0 kHz)"), 2048000 },	// = 12 * 176.4 kHz		[19]
+	{ 2116800.0, TEXT("2.116 Msps (176.4 kHz)"), 2116800 },	// = 12 * 176.4 kHz		[20]
+	{ 2304000.0, TEXT("2.304 Msps (192.0 kHz)"), 2304000 },	// = 12 * 192 kHz		[21]
 
-	{ 2400000.0, TEXT("2.4 Msps"),  2400000 },
+	{ 2400000.0, TEXT("2.4 Msps"),  2400000 },				// [22]
 
 	// loss of samples > 2.4 Msps
 
-	{ 2469600.0, TEXT("2.469 Msps (44.1 kHz, rtl_test!)"), 2469600 },	// = 14 * 176.4 kHz		[19]
+	{ 2469600.0, TEXT("2.469 Msps (44.1 kHz, rtl_test!)"), 2469600 },	// = 14 * 176.4 kHz		[23]
 
-	{ 2500000.0, TEXT("2.50 Msps (rtl_test!)"), 2500000 },				// [20]
+	{ 2500000.0, TEXT("2.50 Msps (rtl_test!)"), 2500000 },				// [24]
 
-	{ 2560000.0, TEXT("2.56 Msps"), 2560000 },				// [21]
+	{ 2560000.0, TEXT("2.56 Msps"), 2560000 },				// [25]
 
 
-	{ 2646000.0, TEXT("2.646 Msps (44.1 kHz, rtl_test!)"), 2646000 },	// = 15 * 176.4 kHz		[22]
+	{ 2646000.0, TEXT("2.646 Msps (44.1 kHz, rtl_test!)"), 2646000 },	// = 15 * 176.4 kHz		[26]
 
-	{ 2688000.0, TEXT("2.688 Msps (48.0 kHz, rtl_test!)"), 2688000 },	// = 14 * 192 kHz		[23]
+	{ 2688000.0, TEXT("2.688 Msps (48.0 kHz, rtl_test!)"), 2688000 },	// = 14 * 192 kHz		[27]
 
-	{ 2822400.0, TEXT("2.822 Msps (44.1 kHz, rtl_test!)"), 2822400 },	// = 16 * 176.4 kHz		[24]
+	{ 2822400.0, TEXT("2.822 Msps (44.1 kHz, rtl_test!)"), 2822400 },	// = 16 * 176.4 kHz		[28]
 
-	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz, rtl_test!)"), 2880000 },	// = 15 * 192 kHz		[25]
+	{ 2880000.0, TEXT("2.88 Msps (48.0 kHz, rtl_test!)"), 2880000 },	// = 15 * 192 kHz		[29]
 
 #if 0
 	{ 3000000.0, TEXT("3.00 Msps (rtl_test!!!)"), 3000000 },
 
-	{ 3072000.0, TEXT("3.072 Msps (192.0 kHz, rtl_test!!!)"), 3072000 },	// 16 * 192 kHz			[17]
+	{ 3072000.0, TEXT("3.072 Msps (192.0 kHz, rtl_test!!!)"), 3072000 },	// 16 * 192 kHz		[]
 	{ 3090000.0, TEXT("3.09 Msps (rtl_test!!!)"), 3090000 },
 	{ 3100000.0, TEXT("3.1 Msps (rtl_test!!!)"), 3100000 },
 #endif
@@ -322,8 +325,8 @@ static volatile int64_t retune_value = 0;
 static int retune_counter = 0;
 static volatile bool retune_freq = false;
 
-static volatile int last_srate_idx = 18;
-static volatile int new_srate_idx = 18;		// default = 2.3 MSps
+static volatile int last_srate_idx = 21;
+static volatile int new_srate_idx = 21;		// default = 2.3 MSps
 
 static volatile int last_TunerBW = 0;		// 0 == automatic, sonst in Hz
 static volatile int new_TunerBW = 0;		// n_bandwidths = bandwidths[]; nearestBwIdx()
