@@ -1,5 +1,5 @@
 
-name: Upload Release Asset
+name: Release Asset
 
 on:
   push:
@@ -32,6 +32,14 @@ jobs:
       with:
         tag_name: ${{ github.ref }}
         release_name: Release ${{ github.ref }}
+        body: |
+          Precompiled ExtIO-DLL with README for Winrad/HDSDR,
+          supporting several new features as announced here:
+          https://www.rtl-sdr.com/new-updates-to-the-librtlsdr-rtl-sdr-driver-fork/
+          
+          Requires rtl_tcp built from development branch of https://github.com/librtlsdr/librtlsdr, e.g.:
+          https://github.com/librtlsdr/librtlsdr/releases/tag/dev_2020-08-26
+
         draft: false
         prerelease: false
 
@@ -45,25 +53,26 @@ jobs:
     steps:
 
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         fetch-depth: 2
+        submodules:  recursive
 
-    - name: Checkout submodules
-      run: git submodule update --depth 1 --init --recursive
-
-    - name: Configure CMake
+    - name: Configure Visual Studio and CMake
       working-directory: ${{runner.workspace}}
-      shell: bash
-      # looks v141_xp Toolset requires VS 2019!
-      run: cmake -G "Visual Studio 16 2019" -T v141_xp -A Win32 -S extio_rtl_tcp -B build
+      run: |
+          # setup the compiler
+          cmd.exe /c "call `"C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat`" && set > %temp%\vcvars.txt"
+          Get-Content "$env:temp\vcvars.txt" | Foreach-Object { if ($_ -match "^(.*?)=(.*)$") { Set-Content "env:\$($matches[1])" $matches[2] } }
+          # run cmake, looks v141_xp Toolset requires VS 2019
+          cmake -G "Visual Studio 16 2019" -T v141_xp -A Win32 -S extio_rtl_tcp -B build
 
     - name: Build
       working-directory: ${{runner.workspace}}
       shell: bash
       run: cmake --build build --config $BUILD_TYPE
 
-    - name: Collect files to distribute
+    - name: Collect files to distribute and create ZIP
       working-directory: ${{runner.workspace}}
       shell: bash
       run: |
@@ -73,7 +82,7 @@ jobs:
         cp "${{runner.workspace}}/build/Release/ExtIO_RTL_TCP.dll" ./
         7z a ExtIO_rtl_tcp_x32.zip README.md README_RTL_TCP.txt LICENSE ExtIO_RTL_TCP.dll
 
-    - name: Upload Release Asset
+    - name: Release Asset
       id: upload-release-asset
       uses: actions/upload-release-asset@v1
       env:
