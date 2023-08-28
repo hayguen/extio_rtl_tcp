@@ -6,4 +6,4 @@
 	url = https://github.com/marzer/tomlplusplus.git
 [submodule "librtlsdr"]
 	path = librtlsdr
-	url = https://github.com/librtlsdr/librtlsdr.git
+	url = https://github.com/hayguen/librtlsdr.git
