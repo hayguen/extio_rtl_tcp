@@ -31,3 +31,5 @@
 #define IDC_GPIO_D                              1033
 #define IDC_GPIO_E                              1034
 #define IDC_BAND_NAME                           1035
+#define IDC_TUNER_MODEL                         1036
+#define IDC_TUNER_BCTR_LABEL                    1037
