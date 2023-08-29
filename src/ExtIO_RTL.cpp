@@ -88,10 +88,6 @@ extHWtypeT extHWtype = exthwUSBdata16;  /* default ExtIO type 16-bit samples */
 #endif
 
 
-const char * TunerName[] = { "None", "E4000", "FC0012", "FC0013", "FC2580", "R860 or R820T/2", "R828D" };
-static const int n_tuners = sizeof(TunerName) / sizeof(TunerName[0]);
-
-
 const int e4k_gains[] =
 { -10, 15, 40, 65, 90, 115, 140, 165, 190, 215, 240, 290, 340, 420 };
 
@@ -121,6 +117,20 @@ const int r820_bws[] =
 //{ 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1300, 1500, 1600, 1750, 1950, 6000 /*, 7000, 8000 */ };
 { 0, 290, 375, 420, 470, 600, 860, 950, 1100, 1200, 1300, 1500, 1600, 1750, 1800, 1950, 2200, 3000, 5000 };
 
+
+static const char * tuner_a_names[] = {
+  "UNKNOWN"
+, "E4000"
+, "FC0012"
+, "FC0013"
+, "FC2580"
+, "R860 or R820T/2"
+, "R828D"
+, "BLOG V4 with R828D"
+};
+static const unsigned n_tuners = sizeof(tuner_a_names) / sizeof(tuner_a_names[0]);
+
+
 struct tuner_gain_t
 {
 	const int * gain;	// 0.1 dB steps: gain in dB = gain[] / 10
@@ -128,7 +138,7 @@ struct tuner_gain_t
 };
 
 
-static tuner_gain_t tuner_rf_gains[] =
+static tuner_gain_t tuner_a_rf_gains[] =
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { e4k_gains, sizeof(e4k_gains) / sizeof(e4k_gains[0]) }
@@ -137,18 +147,23 @@ static tuner_gain_t tuner_rf_gains[] =
 , { 0, 0 }	// FC2580
 , { r820t_gains, sizeof(r820t_gains) / sizeof(r820t_gains[0]) }  // R820T/2
 , { r820t_gains, sizeof(r820t_gains) / sizeof(r820t_gains[0]) }  // R828D
+, { r820t_gains, sizeof(r820t_gains) / sizeof(r820t_gains[0]) }  // RTLSDR_TUNER_BLOG_V4
 };
+static const unsigned n_tuner_rf_gains = sizeof(tuner_a_rf_gains) / sizeof(tuner_a_rf_gains[0]);
 
-static tuner_gain_t tuner_if_gains[] =
+
+static tuner_gain_t tuner_a_if_gains[] =
 {
-  { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
+  { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6, BLOG_V4=7
 , { 0, 0 }  // E4000
 , { 0, 0 }  // FC012
 , { 0, 0 }  // FC013
 , { 0, 0 }	// FC2580
 , { r820t_if_gains, sizeof(r820t_if_gains) / sizeof(r820t_if_gains[0]) }  // R820T/2
 , { r820t_if_gains, sizeof(r820t_if_gains) / sizeof(r820t_if_gains[0]) }  // R828D
+, { r820t_if_gains, sizeof(r820t_if_gains) / sizeof(r820t_if_gains[0]) }  // RTLSDR_TUNER_BLOG_V4
 };
+static const unsigned n_tuner_if_gains = sizeof(tuner_a_if_gains) / sizeof(tuner_a_if_gains[0]);
 
 
 struct tuner_bw_t
@@ -156,7 +171,7 @@ struct tuner_bw_t
 	const int * bw;	// bw in kHz: bw in Hz = bw[] * 1000
 	const int num;
 }
-tuner_bws[] =
+tuner_a_bws[] =
 {
   { 0, 0 }	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
 , { e4k_bws, sizeof(e4k_bws) / sizeof(e4k_bws[0]) }
@@ -165,6 +180,7 @@ tuner_bws[] =
 , { 0, 0 }	// FC2580
 , { r820_bws, sizeof(r820_bws) / sizeof(r820_bws[0]) }  // R820T/2
 , { r820_bws, sizeof(r820_bws) / sizeof(r820_bws[0]) }	// R828D
+, { r820_bws, sizeof(r820_bws) / sizeof(r820_bws[0]) }	// RTLSDR_TUNER_BLOG_V4
 };
 
 
@@ -256,13 +272,13 @@ static TCHAR* directS[] = {
 
 
 static const int * bandwidths = 0;
-static int n_bandwidths = 0;			// tuner_bws[]
+static int n_bandwidths = 0;			// tuner_a_bws[]
 
 static const int * rf_gains = 0;
-static int n_rf_gains = 0;			// tuner_rf_gains[]
+static int n_rf_gains = 0;			// tuner_a_rf_gains[]
 
 static const int * if_gains = 0;
-static int n_if_gains = 0;			// tuner_if_gains[]
+static int n_if_gains = 0;			// tuner_a_if_gains[]
 
 
 static union
@@ -275,7 +291,7 @@ static volatile union
 {
 	int8_t		ac[12];		// 0 .. 3 == "RTL0"
 	uint32_t	ui[3];		// [1] = tuner_type; [2] = tuner_gain_count
-	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6
+	// tuner_type: E4000 =1, FC0012 =2, FC0013 =3, FC2580 =4, R820T =5, R828D =6, BLOG_V4 =7
 	// see enum rtlsdr_tuner in rtl-sdr.h
 } rtl_tcp_dongle_info;
 
@@ -426,6 +442,10 @@ extern pfnExtIOCallback gpfnExtIOCallbackPtr = NULL;
 static INT_PTR CALLBACK MainDlgProc(HWND, UINT, WPARAM, LPARAM);
 static HWND h_dialog=NULL;
 
+static bool isR82XX()
+{
+	return ( RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo || RTLSDR_TUNER_BLOG_V4 == tunerNo );
+}
 
 static bool transmitTcpCmd(CActiveSocket &conn, uint8_t cmdId, uint32_t value)
 {
@@ -663,19 +683,19 @@ static int _setHwLO_check_bands(int64_t freq)
     {
         new_TunerRF_AGC = 0;    // also deactivate AGC
         const int rf_gain_tenth_db = int(ba.tuner_rf_gain_db.value() * 10.0);
-        if (GotTunerInfo && tunerNo < (sizeof(tuner_rf_gains) / sizeof(tuner_rf_gains[0])))
+        if (GotTunerInfo && tunerNo < n_tuner_rf_gains)
         {
-            int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_rf_gains[tunerNo].gain, tuner_rf_gains[tunerNo].num);
-            if (gainIdx >= 0 && gainIdx < tuner_rf_gains[tunerNo].num)
-                new_rf_gain = tuner_rf_gains[tunerNo].gain[gainIdx];
+            int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_a_rf_gains[tunerNo].gain, tuner_a_rf_gains[tunerNo].num);
+            if (gainIdx >= 0 && gainIdx < tuner_a_rf_gains[tunerNo].num)
+                new_rf_gain = tuner_a_rf_gains[tunerNo].gain[gainIdx];
         }
         changed_flags |= (8 | 4);
     }
-    else if (ba.tuner_rf_gain_db && GotTunerInfo && tunerNo < (sizeof(tuner_rf_gains) / sizeof(tuner_rf_gains[0])))
+    else if (ba.tuner_rf_gain_db && GotTunerInfo && tunerNo < n_tuner_rf_gains)
     {
         new_TunerRF_AGC = 0;    // also deactivate AGC
         const int rf_gain_tenth_db = int(ba.tuner_rf_gain_db.value() * 10.0);
-        int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_rf_gains[tunerNo].gain, tuner_rf_gains[tunerNo].num);
+        int gainIdx = nearestGainIdx(rf_gain_tenth_db, tuner_a_rf_gains[tunerNo].gain, tuner_a_rf_gains[tunerNo].num);
         SetAttenuator(gainIdx);
     }
 
@@ -683,21 +703,21 @@ static int _setHwLO_check_bands(int64_t freq)
     {
         new_TunerIF_AGC = 0;    // also deactivate AGC
         int if_gain_tenth_db = int(ba.tuner_if_gain_db.value() * 10.0);
-        if (GotTunerInfo && tunerNo < (sizeof(tuner_if_gains) / sizeof(tuner_if_gains[0])))
+        if (GotTunerInfo && tunerNo < n_tuner_if_gains)
         {
-            new_if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_if_gains[tunerNo].gain, tuner_if_gains[tunerNo].num);
-            if (new_if_gain_idx >= 0 && new_if_gain_idx < tuner_if_gains[tunerNo].num)
-                new_if_gain = tuner_if_gains[tunerNo].gain[new_if_gain_idx];
+            new_if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_a_if_gains[tunerNo].gain, tuner_a_if_gains[tunerNo].num);
+            if (new_if_gain_idx >= 0 && new_if_gain_idx < tuner_a_if_gains[tunerNo].num)
+                new_if_gain = tuner_a_if_gains[tunerNo].gain[new_if_gain_idx];
 
         }
         changed_flags |= 4096;
     }
-    else if (ba.tuner_if_gain_db && GotTunerInfo && tunerNo < (sizeof(tuner_if_gains) / sizeof(tuner_if_gains[0])))
+    else if (ba.tuner_if_gain_db && GotTunerInfo && tunerNo < n_tuner_if_gains)
     {
         new_TunerIF_AGC = 0;    // also deactivate AGC
         const int if_gain_tenth_db = int(ba.tuner_if_gain_db.value() * 10.0);
 
-        int if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_if_gains[tunerNo].gain, tuner_if_gains[tunerNo].num);
+        int if_gain_idx = nearestGainIdx(if_gain_tenth_db, tuner_a_if_gains[tunerNo].gain, tuner_a_if_gains[tunerNo].num);
         ExtIoSetMGC(if_gain_idx);
     }
 
@@ -1677,6 +1697,8 @@ void ThreadProc(void *p)
 
         rtl_tcp_dongle_info.ui[1] = tunerNo = ntohl(rtl_tcp_dongle_info.ui[1]);
         rtl_tcp_dongle_info.ui[2] = numTunerGains = ntohl(rtl_tcp_dongle_info.ui[2]);
+        if ( tunerNo >= n_tuners )
+            tunerNo = RTLSDR_TUNER_UNKNOWN;
 
         if (tunerNo == RTLSDR_TUNER_FC0012 || tunerNo == RTLSDR_TUNER_FC2580)
         {
@@ -1721,8 +1743,8 @@ void ThreadProc(void *p)
             ::MessageBoxA(0, "received 12 bytes header", "Status", 0);
 
         // update bandwidths
-        bandwidths = tuner_bws[tunerNo].bw;
-        n_bandwidths = tuner_bws[tunerNo].num;
+        bandwidths = tuner_a_bws[tunerNo].bw;
+        n_bandwidths = tuner_a_bws[tunerNo].num;
         if (n_bandwidths)
         {
             int bwIdx = nearestBwIdx(new_TunerBW);
@@ -1731,8 +1753,8 @@ void ThreadProc(void *p)
         }
 
         // update hf gains
-        rf_gains = tuner_rf_gains[tunerNo].gain;
-        n_rf_gains = tuner_rf_gains[tunerNo].num;
+        rf_gains = tuner_a_rf_gains[tunerNo].gain;
+        n_rf_gains = tuner_a_rf_gains[tunerNo].num;
         if (n_rf_gains)
         {
             int gainIdx = nearestGainIdx(new_rf_gain, rf_gains, n_rf_gains);
@@ -1741,8 +1763,8 @@ void ThreadProc(void *p)
         }
 
         // update if gains
-        if_gains = tuner_if_gains[tunerNo].gain;
-        n_if_gains = tuner_if_gains[tunerNo].num;
+        if_gains = tuner_a_if_gains[tunerNo].gain;
+        n_if_gains = tuner_a_if_gains[tunerNo].num;
         if (n_if_gains)
         {
             new_if_gain_idx = nearestGainIdx(new_if_gain, if_gains, n_if_gains);
@@ -2219,8 +2241,8 @@ static void updateTunerBWs(HWND hwndDlg)
 	TCHAR str[256];
 	HWND hDlgItmTunerBW = GetDlgItem(hwndDlg, IDC_TUNERBANDWIDTH);
 
-	bandwidths = tuner_bws[tunerNo].bw;
-	n_bandwidths = tuner_bws[tunerNo].num;
+	bandwidths = tuner_a_bws[tunerNo].bw;
+	n_bandwidths = tuner_a_bws[tunerNo].num;
 
 	ComboBox_ResetContent(hDlgItmTunerBW);
 	if (n_bandwidths)
@@ -2240,8 +2262,8 @@ static void updateRFTunerGains(HWND hwndDlg)
 	// HWND hTunerBwLabel = GetDlgItem(hwndDlg, IDC_TUNER_BW_LABEL);
 	// HWND hTunerCtrLabel = GetDlgItem(hwndDlg, IDC_TUNER_BCTR_LABEL);
 
-	rf_gains = tuner_rf_gains[tunerNo].gain;
-	n_rf_gains = tuner_rf_gains[tunerNo].num;
+	rf_gains = tuner_a_rf_gains[tunerNo].gain;
+	n_rf_gains = tuner_a_rf_gains[tunerNo].num;
 
 	if (n_rf_gains > 0)
 	{
@@ -2290,8 +2312,8 @@ static void updateIFTunerGains(HWND hwndDlg)
 	HWND hIFGain = GetDlgItem(hwndDlg, IDC_IF_GAIN_SLIDER);
 	HWND hGainLabel = GetDlgItem(hwndDlg, IDC_TUNER_IF_GAIN_VALUE);
 
-	if_gains = tuner_if_gains[tunerNo].gain;
-	n_if_gains = tuner_if_gains[tunerNo].num;
+	if_gains = tuner_a_if_gains[tunerNo].gain;
+	n_if_gains = tuner_a_if_gains[tunerNo].num;
 
 	if (n_if_gains > 0)
 	{
@@ -2497,9 +2519,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                 updateDecimations(hwndDlg);
 
                 BOOL enableOffset     = (RTLSDR_TUNER_E4000 == tunerNo) ? TRUE : FALSE;
-                BOOL enableSideBand   = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
-                BOOL enableBandCenter = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
-                BOOL enableIFGain     = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
+                BOOL enableSideBand   = (isR82XX()) ? TRUE : FALSE;
+                BOOL enableBandCenter = (isR82XX()) ? TRUE : FALSE;
+                BOOL enableIFGain     = (isR82XX()) ? TRUE : FALSE;
                 BOOL enableTunerBW    = (bandwidths && 0 == new_DirectSampling) ? TRUE : FALSE;
 
                 EnableWindow(hDlgItmOffset, enableOffset);
@@ -2509,8 +2531,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                 EnableWindow(hDlgItmIF_Slider, enableIFGain);
                 EnableWindow(hDlgItmIF_AGC, enableIFGain);
 
-                const char * tunerText = (tunerNo >= 0 && tunerNo < n_tuners)
-                    ? TunerName[tunerNo] : "unknown";
+                const char * tunerText = tuner_a_names[tunerNo];
                 TCHAR str[255];
                 _stprintf_s(str,255, TEXT("Tuner: %s"), tunerText );
                 Static_SetText(GetDlgItem(hwndDlg, IDC_TUNER_MODEL), str);
@@ -2554,7 +2575,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                     new_USB_Sideband = (Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED) ? 1 : 0;
                     somewhat_changed |= 64;
 
-                    BOOL enableSideBand   = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
+                    BOOL enableSideBand   = (isR82XX()) ? TRUE : FALSE;
                     EnableWindow(hDlgItmUsbSB, enableSideBand);
                     return TRUE;
                 }
@@ -2620,7 +2641,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                         last_if_gain = new_if_gain + 1;
                         last_if_gain_idx = new_if_gain_idx + 1;
                         somewhat_changed |= 4096;
-                        BOOL enableIFGain     = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
+                        BOOL enableIFGain     = (isR82XX()) ? TRUE : FALSE;
                         EnableWindow(hIFGain, enableIFGain);
                         int pos = -SendMessage(hIFGain, TBM_GETPOS, (WPARAM)0, (LPARAM)0);
                         TCHAR str[255];
@@ -2775,7 +2796,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPAR
                     retune_counter = fs / 10;
                     retune_freq = true;
 
-                    BOOL enableBandCenter = (RTLSDR_TUNER_R820T == tunerNo || RTLSDR_TUNER_R828D == tunerNo) ? TRUE : FALSE;
+                    BOOL enableBandCenter = (isR82XX()) ? TRUE : FALSE;
                     EnableWindow( GetDlgItem(hwndDlg, IDC_BAND_CENTER_SEL), enableBandCenter);
                 }
                 return TRUE;
